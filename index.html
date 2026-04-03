@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Physics Explorer</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #070c18;
+      color: #e2e8f0;
+      font-family: 'JetBrains Mono', monospace;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 40px 24px;
+    }
+
+    .header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .header h1 {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 32px;
+      font-weight: 900;
+      color: #00d4ff;
+      letter-spacing: 4px;
+      margin-bottom: 8px;
+    }
+    .header p {
+      color: #475569;
+      font-size: 14px;
+      max-width: 500px;
+      line-height: 1.6;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+      gap: 16px;
+      width: 100%;
+      max-width: 980px;
+    }
+
+    .card {
+      background: #0a1220;
+      border: 1px solid #1a2d4a;
+      border-radius: 12px;
+      padding: 24px;
+      text-decoration: none;
+      color: #e2e8f0;
+      transition: border-color 0.2s, transform 0.15s, box-shadow 0.2s;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .card:hover {
+      border-color: #00d4ff;
+      transform: translateY(-3px);
+      box-shadow: 0 8px 24px rgba(0, 212, 255, 0.08);
+    }
+
+    .card-number {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 11px;
+      color: #475569;
+      letter-spacing: 2px;
+    }
+
+    .card-title {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 16px;
+      font-weight: 700;
+      color: #00d4ff;
+      letter-spacing: 1px;
+    }
+
+    .card-desc {
+      color: #94a3b8;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .card-topics {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 4px;
+    }
+    .card-topics span {
+      background: rgba(0, 212, 255, 0.08);
+      border: 1px solid #1a2d4a;
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: 10px;
+      color: #94a3b8;
+    }
+
+    .card-arrow {
+      font-family: 'Orbitron', sans-serif;
+      font-size: 11px;
+      color: #00d4ff;
+      margin-top: auto;
+      padding-top: 8px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .card:hover .card-arrow { opacity: 1; }
+
+    .footer {
+      margin-top: 48px;
+      text-align: center;
+      color: #334155;
+      font-size: 11px;
+      line-height: 1.8;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>PHYSICS EXPLORER</h1>
+    <p>Interactive physics simulators for high school students. Adjust parameters, watch the physics unfold, learn the math.</p>
+  </div>
+
+  <div class="grid">
+
+    <a class="card" href="projectile-sim.html">
+      <div class="card-number">MODULE 01</div>
+      <div class="card-title">PROJECTILE MOTION</div>
+      <div class="card-desc">Launch projectiles with adjustable velocity, angle, and height. Toggle air resistance to see how drag changes everything.</div>
+      <div class="card-topics">
+        <span>Kinematics</span>
+        <span>Drag</span>
+        <span>Trajectory</span>
+        <span>Gravity Presets</span>
+      </div>
+      <div class="card-arrow">LAUNCH &rarr;</div>
+    </a>
+
+    <a class="card" href="forces-sim.html">
+      <div class="card-number">MODULE 02</div>
+      <div class="card-title">FORCES &amp; NEWTON'S LAWS</div>
+      <div class="card-desc">Explore F = ma with free body diagrams, inclined planes, friction, Atwood machines, tension, and work-energy.</div>
+      <div class="card-topics">
+        <span>F = ma</span>
+        <span>Friction</span>
+        <span>Tension</span>
+        <span>Inclines</span>
+        <span>Work</span>
+      </div>
+      <div class="card-arrow">LAUNCH &rarr;</div>
+    </a>
+
+    <a class="card" href="collisions-sim.html">
+      <div class="card-number">MODULE 03</div>
+      <div class="card-title">ENERGY &amp; COLLISIONS</div>
+      <div class="card-desc">KE, PE, springs, and the conservation laws. Elastic vs inelastic collisions — discover when energy is and isn't conserved.</div>
+      <div class="card-topics">
+        <span>KE / PE</span>
+        <span>Springs</span>
+        <span>Elastic</span>
+        <span>Inelastic</span>
+        <span>Momentum</span>
+      </div>
+      <div class="card-arrow">LAUNCH &rarr;</div>
+    </a>
+
+    <a class="card" href="pendulum-sim.html">
+      <div class="card-number">MODULE 04</div>
+      <div class="card-title">PENDULUMS &amp; SHM</div>
+      <div class="card-desc">Swinging pendulums, bouncing springs, sine waves, and damped oscillations. Animated physics in real time.</div>
+      <div class="card-topics">
+        <span>Pendulum</span>
+        <span>Mass-Spring</span>
+        <span>SHM Graphs</span>
+        <span>Damping</span>
+      </div>
+      <div class="card-arrow">LAUNCH &rarr;</div>
+    </a>
+
+    <a class="card" href="circular-sim.html">
+      <div class="card-number">MODULE 05</div>
+      <div class="card-title">CIRCULAR MOTION</div>
+      <div class="card-desc">Orbits, centripetal force, vertical loops, banked curves, and the beautiful connection between circular motion and SHM.</div>
+      <div class="card-topics">
+        <span>Centripetal</span>
+        <span>Vertical Loops</span>
+        <span>Banked Curves</span>
+        <span>SHM Link</span>
+      </div>
+      <div class="card-arrow">LAUNCH &rarr;</div>
+    </a>
+
+    <div class="card" style="border-style: dashed; opacity: 0.4; cursor: default;">
+      <div class="card-number">COMING SOON</div>
+      <div class="card-title">WAVES &amp; SOUND</div>
+      <div class="card-desc">Mechanical waves, interference, standing waves, and the physics of sound.</div>
+      <div class="card-topics">
+        <span>Wavelength</span>
+        <span>Frequency</span>
+        <span>Interference</span>
+      </div>
+    </div>
+
+    <div class="card" style="border-style: dashed; opacity: 0.4; cursor: default;">
+      <div class="card-number">COMING SOON</div>
+      <div class="card-title">OPTICS</div>
+      <div class="card-desc">Reflection, refraction, Snell's Law, total internal reflection, and lenses.</div>
+      <div class="card-topics">
+        <span>Snell's Law</span>
+        <span>Refraction</span>
+        <span>Lenses</span>
+      </div>
+    </div>
+
+  </div>
+
+  <div class="footer">
+    Built with physics, code, and a little bit of love.<br />
+    Algebra-based &middot; No install required &middot; Works offline after first load
+  </div>
+
+</body>
+</html>

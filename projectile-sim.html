@@ -1,0 +1,789 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Projectile Motion Simulator</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <!-- React 18 (development builds — shows errors in console) -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+  <!-- Recharts dependency -->
+  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+
+  <!-- Recharts (UMD build) -->
+  <script crossorigin src="https://unpkg.com/recharts@2.15.3/umd/Recharts.js"></script>
+
+  <!-- Babel standalone — compiles JSX in the browser -->
+  <script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #070c18; overflow-x: hidden; }
+
+    input[type="range"] {
+      -webkit-appearance: none;
+      appearance: none;
+      outline: none;
+      height: 4px;
+      border-radius: 2px;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #00d4ff;
+      cursor: pointer;
+      border: 2px solid #070c18;
+    }
+    input[type="range"]:disabled::-webkit-slider-thumb {
+      background: #475569;
+      cursor: not-allowed;
+    }
+  </style>
+</head>
+<body>
+  <div style="background:#070c18;padding:8px 24px;font-family:'JetBrains Mono',monospace;">
+    <a href="index.html" style="color:#475569;font-size:11px;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00d4ff'" onmouseout="this.style.color='#475569'">&larr; Physics Explorer</a>
+  </div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    // ─── Pull React hooks and Recharts components from globals ───
+    const { useState, useEffect, useMemo, useCallback, useRef } = React;
+    const {
+      LineChart, Line, XAxis, YAxis, CartesianGrid,
+      Tooltip, ResponsiveContainer,
+    } = Recharts;
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONSTANTS & CONFIGURATION
+    // ═══════════════════════════════════════════════════════════════
+
+    const GRAVITY_PRESETS = {
+      Earth:   { g: 9.81,  label: "Earth (9.81 m/s²)" },
+      Moon:    { g: 1.62,  label: "Moon (1.62 m/s²)" },
+      Mars:    { g: 3.72,  label: "Mars (3.72 m/s²)" },
+      Jupiter: { g: 24.79, label: "Jupiter (24.79 m/s²)" },
+    };
+
+    const SPEED_OPTIONS = [0.25, 0.5, 1, 2];
+
+    const COLORS = {
+      bg: "#070c18",
+      panel: "#0a1220",
+      border: "#1a2d4a",
+      accent: "#00d4ff",
+      trajectory: "#ff6b35",
+      ideal: "#00d4ff",
+      muted: "#475569",
+      mutedLight: "#334155",
+      text: "#e2e8f0",
+      textDim: "#94a3b8",
+      success: "#22c55e",
+      warning: "#eab308",
+    };
+
+    const MAX_EULER_STEPS = 60000;
+    const MAX_TRAJECTORY_POINTS = 3000;
+
+    // ═══════════════════════════════════════════════════════════════
+    // PHYSICS ENGINE
+    // ═══════════════════════════════════════════════════════════════
+
+    function round2(n) { return Math.round(n * 100) / 100; }
+    function round3(n) { return Math.round(n * 1000) / 1000; }
+
+    /**
+     * Analytical trajectory (no air resistance).
+     * Closed-form solution: constant vx, linearly changing vy.
+     */
+    function computeAnalytical(v0, angleDeg, h0, g) {
+      const theta = (angleDeg * Math.PI) / 180;
+      const vx0 = v0 * Math.cos(theta);
+      const vy0 = v0 * Math.sin(theta);
+
+      if (v0 === 0 && h0 === 0) {
+        return [{ t: 0, x: 0, y: 0, vx: 0, vy: 0 }];
+      }
+
+      let tFlight;
+      if (g === 0) {
+        tFlight = (vy0 > 0 || h0 > 0) ? 60 : 0;
+      } else {
+        const disc = vy0 * vy0 + 2 * g * h0;
+        if (disc < 0) return [{ t: 0, x: 0, y: h0, vx: vx0, vy: vy0 }];
+        tFlight = (vy0 + Math.sqrt(disc)) / g;
+      }
+
+      if (tFlight <= 0) {
+        return [{ t: 0, x: 0, y: h0, vx: vx0, vy: vy0 }];
+      }
+
+      const numPoints = Math.min(Math.max(Math.ceil(tFlight / 0.02), 50), MAX_TRAJECTORY_POINTS);
+      const dt = tFlight / numPoints;
+      const points = [];
+
+      for (let i = 0; i <= numPoints; i++) {
+        const t = i * dt;
+        points.push({
+          t: Math.round(t * 1000) / 1000,
+          x: Math.round(vx0 * t * 100) / 100,
+          y: Math.max(Math.round((h0 + vy0 * t - 0.5 * g * t * t) * 100) / 100, 0),
+          vx: Math.round(vx0 * 100) / 100,
+          vy: Math.round((vy0 - g * t) * 100) / 100,
+        });
+      }
+
+      const last = points[points.length - 1];
+      last.y = 0;
+      last.t = Math.round(tFlight * 1000) / 1000;
+      last.x = Math.round(vx0 * tFlight * 100) / 100;
+      last.vy = Math.round((vy0 - g * tFlight) * 100) / 100;
+
+      return points;
+    }
+
+    /**
+     * Numerical Euler integration with quadratic drag.
+     * Uses adaptive step size for accuracy at high drag.
+     */
+    function computeNumerical(v0, angleDeg, h0, g, mass, k) {
+      const theta = (angleDeg * Math.PI) / 180;
+      let vx = v0 * Math.cos(theta);
+      let vy = v0 * Math.sin(theta);
+      let x = 0, y = h0, t = 0;
+      const safeMass = Math.max(mass, 0.01);
+
+      if (v0 === 0 && h0 === 0) {
+        return [{ t: 0, x: 0, y: 0, vx: 0, vy: 0 }];
+      }
+
+      const baseDt = 0.02;
+      const points = [{ t: 0, x: 0, y: h0, vx: round2(vx), vy: round2(vy) }];
+      let steps = 0, accumT = 0;
+      const sampleInterval = baseDt;
+
+      while (y >= 0 && steps < MAX_EULER_STEPS) {
+        const speed = Math.sqrt(vx * vx + vy * vy);
+
+        let dt = baseDt;
+        if (speed > 0) {
+          const dragAccel = (k / safeMass) * speed * speed;
+          const totalAccel = Math.sqrt(dragAccel * dragAccel + g * g);
+          if (totalAccel * baseDt > speed * 0.5) {
+            dt = Math.max((speed * 0.1) / totalAccel, 0.001);
+          }
+        }
+
+        let ax = 0, ay = -g;
+        if (speed > 0) {
+          ax -= (k / safeMass) * speed * vx;
+          ay -= (k / safeMass) * speed * vy;
+        }
+
+        vx += ax * dt;
+        vy += ay * dt;
+        x  += vx * dt;
+        y  += vy * dt;
+        t  += dt;
+        accumT += dt;
+        steps++;
+
+        if (y < 0) {
+          const prevPt = points[points.length - 1];
+          const frac = prevPt.y / (prevPt.y - y);
+          points.push({
+            t: round3(prevPt.t + frac * (t - prevPt.t)),
+            x: round2(prevPt.x + frac * (x - prevPt.x)),
+            y: 0,
+            vx: round2(prevPt.vx + frac * (vx - prevPt.vx)),
+            vy: round2(prevPt.vy + frac * (vy - prevPt.vy)),
+          });
+          break;
+        }
+
+        if (accumT >= sampleInterval) {
+          points.push({
+            t: round3(t),
+            x: round2(x),
+            y: round2(Math.max(y, 0)),
+            vx: round2(vx),
+            vy: round2(vy),
+          });
+          accumT = 0;
+        }
+      }
+
+      if (points[points.length - 1].y > 0 && steps >= MAX_EULER_STEPS) {
+        points[points.length - 1].y = 0;
+      }
+
+      return points;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DERIVED METRICS
+    // ═══════════════════════════════════════════════════════════════
+
+    function computeMetrics(trajectory) {
+      if (!trajectory || trajectory.length === 0) {
+        return { range: 0, maxHeight: 0, flightTime: 0, impactSpeed: 0, impactAngle: 0 };
+      }
+      const last = trajectory[trajectory.length - 1];
+      const maxHeight = Math.max(...trajectory.map((p) => p.y));
+      const impactSpeed = Math.sqrt(last.vx * last.vx + last.vy * last.vy);
+      const impactAngle = Math.abs((Math.atan2(Math.abs(last.vy), Math.abs(last.vx)) * 180) / Math.PI);
+      return {
+        range: round2(last.x),
+        maxHeight: round2(maxHeight),
+        flightTime: round3(last.t),
+        impactSpeed: round2(impactSpeed),
+        impactAngle: round2(impactAngle),
+      };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PEDAGOGICAL HINTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function getHints(angleDeg, dragEnabled, v0) {
+      const hints = [];
+
+      if (angleDeg === 45 && !dragEnabled) {
+        hints.push({
+          icon: "\u{1F3AF}",
+          text: "45\u00B0 gives maximum range on flat ground (no drag). This is because sin(2\u03B8) is maximized at \u03B8 = 45\u00B0.",
+        });
+      }
+
+      if (!dragEnabled && angleDeg > 0 && angleDeg < 90) {
+        const comp = 90 - angleDeg;
+        if (comp !== angleDeg) {
+          hints.push({
+            icon: "\u{1F504}",
+            text: `Complementary angles: ${angleDeg}\u00B0 and ${comp}\u00B0 give the same range on flat ground (no drag), but different max heights and flight times.`,
+          });
+        }
+      }
+
+      if (dragEnabled) {
+        hints.push({
+          icon: "\u{1F4A8}",
+          text: "With air resistance, the optimal launch angle shifts below 45\u00B0. The projectile loses more energy on the way up (fighting both gravity and drag), making lower angles more efficient.",
+        });
+        hints.push({
+          icon: "\u2696\uFE0F",
+          text: "Notice that mass matters now! A heavier projectile has more inertia to resist drag. This is why a bowling ball flies differently from a beach ball \u2014 even Galileo would agree that mass matters when air is involved.",
+        });
+      }
+
+      if (v0 === 0) {
+        hints.push({
+          icon: "\u{1F4D0}",
+          text: "With zero launch velocity, the projectile simply falls straight down from the launch height (if any). This is free fall!",
+        });
+      }
+
+      return hints;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // COMPARISON TRAJECTORY ALIGNMENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function alignComparison(dragTraj, idealTraj) {
+      if (!idealTraj || idealTraj.length < 2) return { aligned: [], warning: null };
+
+      const idealMaxX = idealTraj[idealTraj.length - 1].x;
+      const dragMaxX  = dragTraj[dragTraj.length - 1].x;
+
+      let warning = null;
+      if (idealMaxX > 0 && dragMaxX / idealMaxX < 0.3) {
+        warning = "\u26A0\uFE0F Drag is very strong \u2014 the ideal trajectory extends much farther. The comparison overlay may be less useful at this scale.";
+      }
+
+      return { aligned: idealTraj, warning };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SLIDER COMPONENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function Slider({ label, value, min, max, step, onChange, unit, disabled, tooltip }) {
+      const pct = ((value - min) / (max - min)) * 100;
+      return (
+        <div style={{ marginBottom: 12, opacity: disabled ? 0.4 : 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+            <span style={{ color: COLORS.textDim }}>
+              {label}
+              {tooltip && disabled && (
+                <span style={{ color: COLORS.warning, marginLeft: 6, fontSize: 10, fontStyle: "italic" }}>{tooltip}</span>
+              )}
+            </span>
+            <span style={{ color: COLORS.accent }}>
+              {value}
+              {unit && <span style={{ color: COLORS.muted, marginLeft: 2 }}>{unit}</span>}
+            </span>
+          </div>
+          <input
+            type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+            onChange={(e) => onChange(parseFloat(e.target.value))}
+            style={{
+              width: "100%",
+              accentColor: COLORS.accent,
+              background: `linear-gradient(to right, ${COLORS.accent} 0%, ${COLORS.accent} ${pct}%, ${COLORS.border} ${pct}%, ${COLORS.border} 100%)`,
+              height: 4, borderRadius: 2,
+              cursor: disabled ? "not-allowed" : "pointer",
+            }}
+          />
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // EQUATION PANEL
+    // ═══════════════════════════════════════════════════════════════
+
+    function EquationPanel({ dragEnabled }) {
+      const eqStyle = {
+        fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: COLORS.textDim,
+        lineHeight: 1.8, padding: "8px 12px", background: "rgba(0,0,0,0.3)",
+        borderRadius: 6, border: `1px solid ${COLORS.border}`,
+      };
+
+      if (!dragEnabled) {
+        return (
+          <div style={eqStyle}>
+            <div style={{ color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" }}>
+              Analytical Equations
+            </div>
+            <div>x(t) = v&#8320;&middot;cos(&theta;)&middot;t</div>
+            <div>y(t) = h&#8320; + v&#8320;&middot;sin(&theta;)&middot;t &minus; &frac12;g&middot;t&sup2;</div>
+            <div>vx(t) = v&#8320;&middot;cos(&theta;) <span style={{ color: COLORS.accent }}>&larr; constant!</span></div>
+            <div>vy(t) = v&#8320;&middot;sin(&theta;) &minus; g&middot;t</div>
+          </div>
+        );
+      }
+
+      return (
+        <div style={eqStyle}>
+          <div style={{ color: COLORS.trajectory, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" }}>
+            Numerical (Euler) with Drag
+          </div>
+          <div>F_drag = k&middot;v&sup2; (opposing motion)</div>
+          <div>ax = &minus;(k/m)&middot;|v|&middot;vx</div>
+          <div>ay = &minus;g &minus; (k/m)&middot;|v|&middot;vy</div>
+          <div style={{ marginTop: 4, color: COLORS.muted, fontSize: 10 }}>
+            Integrated with adaptive dt (base 0.02s)
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // METRIC ROW
+    // ═══════════════════════════════════════════════════════════════
+
+    function MetricRow({ label, value, unit, color }) {
+      return (
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ color: COLORS.muted }}>{label}</span>
+          <span>
+            <span style={{ color: color || COLORS.text, fontWeight: 500 }}>{value}</span>
+            <span style={{ color: COLORS.muted, marginLeft: 4, fontSize: 10 }}>{unit}</span>
+          </span>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MAIN COMPONENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function ProjectileSimulator() {
+      const [v0, setV0] = useState(25);
+      const [angle, setAngle] = useState(45);
+      const [h0, setH0] = useState(0);
+      const [mass, setMass] = useState(1);
+      const [gravityKey, setGravityKey] = useState("Earth");
+      const [dragEnabled, setDragEnabled] = useState(false);
+      const [dragK, setDragK] = useState(0.1);
+
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [animSpeed, setAnimSpeed] = useState(1);
+      const [animIdx, setAnimIdx] = useState(0);
+      const [idealAnimIdx, setIdealAnimIdx] = useState(0);
+      const rafRef = useRef(null);
+      const simTRef = useRef(0);
+      const lastFrameRef = useRef(null);
+      const trajRef = useRef(null);
+      const idealTrajRef = useRef(null);
+
+      const g = GRAVITY_PRESETS[gravityKey].g;
+
+      // ─── Compute trajectories ───
+      const trajectory = useMemo(() => {
+        return dragEnabled
+          ? computeNumerical(v0, angle, h0, g, mass, dragK)
+          : computeAnalytical(v0, angle, h0, g);
+      }, [v0, angle, h0, g, mass, dragK, dragEnabled]);
+
+      const idealTrajectory = useMemo(() => {
+        return dragEnabled ? computeAnalytical(v0, angle, h0, g) : null;
+      }, [v0, angle, h0, g, dragEnabled]);
+
+      const { aligned: comparisonData, warning: comparisonWarning } = useMemo(() => {
+        if (!idealTrajectory) return { aligned: [], warning: null };
+        return alignComparison(trajectory, idealTrajectory);
+      }, [trajectory, idealTrajectory]);
+
+      useEffect(() => { trajRef.current = trajectory; }, [trajectory]);
+      useEffect(() => { idealTrajRef.current = idealTrajectory; }, [idealTrajectory]);
+
+      const metrics = useMemo(() => computeMetrics(trajectory), [trajectory]);
+      const idealMetrics = useMemo(() => idealTrajectory ? computeMetrics(idealTrajectory) : null, [idealTrajectory]);
+      const hints = useMemo(() => getHints(angle, dragEnabled, v0), [angle, dragEnabled, v0]);
+
+      // ─── Reset animation when inputs change ───
+      useEffect(() => {
+        stopAnimation();
+        setAnimIdx(0);
+        setIdealAnimIdx(0);
+        simTRef.current = 0;
+      }, [v0, angle, h0, g, mass, dragK, dragEnabled]);
+
+      // ─── Animation loop ───
+      const stopAnimation = useCallback(() => {
+        if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+        lastFrameRef.current = null;
+        setIsPlaying(false);
+      }, []);
+
+      const animate = useCallback((timestamp) => {
+        if (!lastFrameRef.current) {
+          lastFrameRef.current = timestamp;
+          rafRef.current = requestAnimationFrame(animate);
+          return;
+        }
+        const deltaMs = timestamp - lastFrameRef.current;
+        lastFrameRef.current = timestamp;
+        simTRef.current += (deltaMs / 1000) * animSpeed;
+
+        const traj = trajRef.current;
+        const idealTraj = idealTrajRef.current;
+        if (!traj || traj.length === 0) { stopAnimation(); return; }
+
+        const maxT = traj[traj.length - 1].t;
+        const idealMaxT = idealTraj ? idealTraj[idealTraj.length - 1].t : 0;
+        const overallMaxT = Math.max(maxT, idealMaxT);
+
+        // Update main trajectory index
+        let mainDone = false;
+        if (simTRef.current >= maxT) {
+          setAnimIdx(traj.length - 1);
+          mainDone = true;
+        } else {
+          let lo = 0, hi = traj.length - 1;
+          while (lo < hi) { const mid = (lo + hi) >> 1; if (traj[mid].t < simTRef.current) lo = mid + 1; else hi = mid; }
+          setAnimIdx(lo);
+        }
+
+        // Update ideal trajectory index
+        let idealDone = true;
+        if (idealTraj && idealTraj.length > 1) {
+          if (simTRef.current >= idealMaxT) {
+            setIdealAnimIdx(idealTraj.length - 1);
+            idealDone = true;
+          } else {
+            idealDone = false;
+            let lo = 0, hi = idealTraj.length - 1;
+            while (lo < hi) { const mid = (lo + hi) >> 1; if (idealTraj[mid].t < simTRef.current) lo = mid + 1; else hi = mid; }
+            setIdealAnimIdx(lo);
+          }
+        }
+
+        // Stop only when both are finished
+        if (simTRef.current >= overallMaxT) { stopAnimation(); return; }
+
+        rafRef.current = requestAnimationFrame(animate);
+      }, [animSpeed, stopAnimation]);
+
+      const startAnimation = useCallback(() => {
+        if (trajectory.length <= 1) return;
+        const mainDone = animIdx >= trajectory.length - 1;
+        const idealDone = !idealTrajectory || idealAnimIdx >= idealTrajectory.length - 1;
+        if (mainDone && idealDone) { simTRef.current = 0; setAnimIdx(0); setIdealAnimIdx(0); }
+        setIsPlaying(true);
+        lastFrameRef.current = null;
+        rafRef.current = requestAnimationFrame(animate);
+      }, [animate, trajectory, idealTrajectory, animIdx, idealAnimIdx]);
+
+      const togglePlay = useCallback(() => {
+        if (isPlaying) stopAnimation(); else startAnimation();
+      }, [isPlaying, stopAnimation, startAnimation]);
+
+      const resetAnimation = useCallback(() => {
+        stopAnimation(); setAnimIdx(0); setIdealAnimIdx(0); simTRef.current = 0;
+      }, [stopAnimation]);
+
+      useEffect(() => { return () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }; }, []);
+
+      // ─── Current point ───
+      const currentPoint = trajectory[animIdx] || trajectory[0] || { t: 0, x: 0, y: 0, vx: 0, vy: 0 };
+      const currentSpeed = Math.sqrt(currentPoint.vx ** 2 + currentPoint.vy ** 2);
+
+      const xMax = Math.max(...trajectory.map(p => p.x), ...(comparisonData.length > 0 ? comparisonData.map(p => p.x) : [0]), 1);
+      const yMax = Math.max(...trajectory.map(p => p.y), ...(comparisonData.length > 0 ? comparisonData.map(p => p.y) : [0]), 1);
+
+      // ─── Render ───
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.text, minHeight: "100vh", padding: "20px 24px", fontFamily: "'JetBrains Mono', monospace" }}>
+
+          {/* Header */}
+          <div style={{ textAlign: "center", marginBottom: 20 }}>
+            <h1 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 22, fontWeight: 700, color: COLORS.accent, letterSpacing: 2, marginBottom: 4 }}>
+              PROJECTILE MOTION SIMULATOR
+            </h1>
+            <p style={{ color: COLORS.muted, fontSize: 12 }}>
+              Interactive physics &mdash; adjust parameters, observe trajectories, learn the math
+            </p>
+          </div>
+
+          <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+
+            {/* ═══════ LEFT PANEL: Controls ═══════ */}
+            <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+
+              {/* Launch parameters */}
+              <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14 }}>
+                <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: COLORS.accent, marginBottom: 12, letterSpacing: 1 }}>
+                  LAUNCH PARAMETERS
+                </div>
+                <Slider label="Velocity" value={v0} min={0} max={100} step={1} onChange={setV0} unit="m/s" />
+                <Slider label="Angle" value={angle} min={0} max={90} step={1} onChange={setAngle} unit="&deg;" />
+                <Slider label="Height" value={h0} min={0} max={100} step={1} onChange={setH0} unit="m" />
+              </div>
+
+              {/* Gravity */}
+              <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14 }}>
+                <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: COLORS.accent, marginBottom: 10, letterSpacing: 1 }}>
+                  GRAVITY
+                </div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {Object.entries(GRAVITY_PRESETS).map(([key]) => (
+                    <button key={key} onClick={() => setGravityKey(key)}
+                      style={{
+                        background: gravityKey === key ? COLORS.accent : "transparent",
+                        color: gravityKey === key ? COLORS.bg : COLORS.textDim,
+                        border: `1px solid ${gravityKey === key ? COLORS.accent : COLORS.border}`,
+                        borderRadius: 4, padding: "4px 10px", fontSize: 11,
+                        fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
+                      }}>
+                      {key}
+                    </button>
+                  ))}
+                </div>
+                <div style={{ color: COLORS.muted, fontSize: 10, marginTop: 6 }}>g = {g} m/s&sup2;</div>
+              </div>
+
+              {/* Drag */}
+              <div style={{ background: COLORS.panel, border: `1px solid ${dragEnabled ? COLORS.trajectory : COLORS.border}`, borderRadius: 8, padding: 14, transition: "border-color 0.2s" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: dragEnabled ? COLORS.trajectory : COLORS.accent, letterSpacing: 1 }}>
+                    AIR RESISTANCE
+                  </div>
+                  <button onClick={() => setDragEnabled(!dragEnabled)}
+                    style={{
+                      background: dragEnabled ? COLORS.trajectory : COLORS.border,
+                      color: dragEnabled ? "#fff" : COLORS.muted,
+                      border: "none", borderRadius: 12, padding: "3px 12px",
+                      fontSize: 10, fontFamily: "'JetBrains Mono', monospace",
+                      cursor: "pointer", fontWeight: 700,
+                    }}>
+                    {dragEnabled ? "ON" : "OFF"}
+                  </button>
+                </div>
+                <Slider label="Drag coeff (k)" value={dragK} min={0.01} max={1.0} step={0.01} onChange={setDragK} unit="kg/m" disabled={!dragEnabled} />
+                <Slider label="Mass" value={mass} min={0.1} max={20} step={0.1} onChange={setMass} unit="kg" disabled={!dragEnabled} tooltip={!dragEnabled ? "Enable drag to unlock" : ""} />
+              </div>
+
+              {/* Equations */}
+              <EquationPanel dragEnabled={dragEnabled} />
+            </div>
+
+            {/* ═══════ RIGHT PANEL: Chart & Data ═══════ */}
+            <div style={{ flex: 1, minWidth: 400, display: "flex", flexDirection: "column", gap: 12 }}>
+
+              {/* Chart */}
+              <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "14px 14px 6px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: COLORS.accent, letterSpacing: 1 }}>
+                    TRAJECTORY
+                  </div>
+                  {dragEnabled && (
+                    <div style={{ display: "flex", gap: 10, marginRight: 12, fontSize: 10 }}>
+                      <span><span style={{ color: COLORS.trajectory }}>&mdash;&mdash;</span> <span style={{ color: COLORS.textDim }}>With drag</span></span>
+                      <span><span style={{ color: COLORS.ideal }}>- - -</span> <span style={{ color: COLORS.textDim }}>Ideal (no drag)</span></span>
+                    </div>
+                  )}
+                </div>
+
+                {comparisonWarning && (
+                  <div style={{ background: "rgba(234,179,8,0.1)", border: `1px solid ${COLORS.warning}`, borderRadius: 4, padding: "4px 8px", fontSize: 10, color: COLORS.warning, marginBottom: 8 }}>
+                    {comparisonWarning}
+                  </div>
+                )}
+
+                <ResponsiveContainer width="100%" height={320}>
+                  <LineChart margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                    <CartesianGrid stroke={COLORS.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="x" type="number" domain={[0, Math.ceil(xMax * 1.05)]}
+                      tick={{ fill: COLORS.muted, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
+                      label={{ value: "Distance (m)", position: "insideBottom", offset: -10, style: { fill: COLORS.muted, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" } }}
+                      allowDataOverflow />
+                    <YAxis dataKey="y" type="number" domain={[0, Math.ceil(yMax * 1.1)]}
+                      tick={{ fill: COLORS.muted, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" }}
+                      label={{ value: "Height (m)", angle: -90, position: "insideLeft", offset: 10, style: { fill: COLORS.muted, fontSize: 10, fontFamily: "'JetBrains Mono', monospace" } }}
+                      allowDataOverflow />
+                    <Tooltip
+                      contentStyle={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 11 }}
+                      labelFormatter={() => ""}
+                      formatter={(value, name) => [round2(value), name]} />
+
+                    {/* Comparison (ideal) trajectory */}
+                    {dragEnabled && comparisonData.length > 0 && (
+                      <Line data={comparisonData} dataKey="y" type="monotone"
+                        stroke={COLORS.ideal} strokeDasharray="6 4" strokeWidth={1.5}
+                        strokeOpacity={0.5}
+                        dot={(props) => {
+                          const { cx, cy, index } = props;
+                          if (index === idealAnimIdx) {
+                            return <circle key="ideal-dot" cx={cx} cy={cy} r={5} fill={COLORS.ideal} stroke="#fff" strokeWidth={1.5} opacity={0.85} />;
+                          }
+                          return null;
+                        }}
+                        isAnimationActive={false} name="Ideal Height" />
+                    )}
+
+                    {/* Main trajectory */}
+                    <Line data={trajectory} dataKey="y" type="monotone"
+                      stroke={COLORS.trajectory} strokeWidth={2.5}
+                      dot={(props) => {
+                        const { cx, cy, index } = props;
+                        if (index === animIdx) {
+                          return <circle key="anim-dot" cx={cx} cy={cy} r={6} fill={COLORS.trajectory} stroke="#fff" strokeWidth={2} />;
+                        }
+                        return null;
+                      }}
+                      isAnimationActive={false} name="Height" />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Animation controls */}
+              <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: "10px 14px", display: "flex", alignItems: "center", gap: 12 }}>
+                <button onClick={togglePlay}
+                  style={{ background: COLORS.accent, color: COLORS.bg, border: "none", borderRadius: 4, padding: "6px 16px", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", fontWeight: 700, cursor: "pointer", minWidth: 60 }}>
+                  {isPlaying ? "\u23F8 Pause" : "\u25B6 Play"}
+                </button>
+                <button onClick={resetAnimation}
+                  style={{ background: "transparent", color: COLORS.textDim, border: `1px solid ${COLORS.border}`, borderRadius: 4, padding: "6px 12px", fontSize: 12, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer" }}>
+                  &#8634; Reset
+                </button>
+                <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+                  {SPEED_OPTIONS.map((s) => (
+                    <button key={s} onClick={() => setAnimSpeed(s)}
+                      style={{
+                        background: animSpeed === s ? COLORS.accent : "transparent",
+                        color: animSpeed === s ? COLORS.bg : COLORS.textDim,
+                        border: `1px solid ${animSpeed === s ? COLORS.accent : COLORS.border}`,
+                        borderRadius: 4, padding: "3px 8px", fontSize: 10,
+                        fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
+                      }}>
+                      {s}&times;
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Metrics & live readout */}
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+
+                {/* Summary metrics */}
+                <div style={{ flex: 1, minWidth: 200, background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14 }}>
+                  <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: COLORS.accent, marginBottom: 10, letterSpacing: 1 }}>RESULTS</div>
+                  <MetricRow label="Range" value={metrics.range} unit="m" />
+                  <MetricRow label="Max Height" value={metrics.maxHeight} unit="m" />
+                  <MetricRow label="Flight Time" value={metrics.flightTime} unit="s" />
+                  <MetricRow label="Impact Speed" value={metrics.impactSpeed} unit="m/s" />
+                  <MetricRow label="Impact Angle" value={metrics.impactAngle} unit="&deg;" />
+
+                  {idealMetrics && (
+                    <>
+                      <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 8, paddingTop: 8, fontSize: 10, color: COLORS.ideal, fontFamily: "'Orbitron', sans-serif", letterSpacing: 1, marginBottom: 6 }}>
+                        IDEAL (NO DRAG)
+                      </div>
+                      <MetricRow label="Range" value={idealMetrics.range} unit="m" color={COLORS.ideal} />
+                      <MetricRow label="Max Height" value={idealMetrics.maxHeight} unit="m" color={COLORS.ideal} />
+                      <MetricRow label="Flight Time" value={idealMetrics.flightTime} unit="s" color={COLORS.ideal} />
+                    </>
+                  )}
+                </div>
+
+                {/* Live readout */}
+                <div style={{ flex: 1, minWidth: 200, background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14 }}>
+                  <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: COLORS.accent, marginBottom: 10, letterSpacing: 1 }}>LIVE READOUT</div>
+                  <MetricRow label="t" value={currentPoint.t} unit="s" />
+                  <MetricRow label="x" value={currentPoint.x} unit="m" />
+                  <MetricRow label="y" value={currentPoint.y} unit="m" />
+                  <MetricRow label="v" value={round2(currentSpeed)} unit="m/s" />
+                  <div style={{ borderTop: `1px solid ${COLORS.border}`, marginTop: 6, paddingTop: 6 }}>
+                    <MetricRow label="vx" value={currentPoint.vx} unit="m/s" color={COLORS.success} />
+                    <MetricRow label="vy" value={currentPoint.vy} unit="m/s" color={COLORS.warning} />
+                  </div>
+                  {!dragEnabled && (
+                    <div style={{ fontSize: 9, color: COLORS.muted, marginTop: 4, fontStyle: "italic" }}>
+                      Notice: vx stays constant (no horizontal force)
+                    </div>
+                  )}
+                  {dragEnabled && (
+                    <div style={{ fontSize: 9, color: COLORS.muted, marginTop: 4, fontStyle: "italic" }}>
+                      Both vx and vy change &mdash; drag acts on both components
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Pedagogical hints */}
+              {hints.length > 0 && (
+                <div style={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 8, padding: 14 }}>
+                  <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: COLORS.accent, marginBottom: 8, letterSpacing: 1 }}>INSIGHTS</div>
+                  {hints.map((h, i) => (
+                    <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 11, color: COLORS.textDim, lineHeight: 1.5 }}>
+                      <span style={{ flexShrink: 0 }}>{h.icon}</span>
+                      <span>{h.text}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // ─── Mount the app ───
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<ProjectileSimulator />);
+  </script>
+</body>
+</html>

@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Circular Motion &amp; Centripetal Force</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.15.3/umd/Recharts.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #070c18; overflow-x: hidden; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; outline: none; height: 4px; border-radius: 2px; }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #00d4ff; cursor: pointer; border: 2px solid #070c18;
+    }
+    input[type="range"]:disabled::-webkit-slider-thumb { background: #475569; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div style="background:#070c18;padding:8px 24px;font-family:'JetBrains Mono',monospace;">
+    <a href="index.html" style="color:#475569;font-size:11px;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00d4ff'" onmouseout="this.style.color='#475569'">&larr; Physics Explorer</a>
+  </div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    var h = React.createElement;
+    var useState = React.useState, useMemo = React.useMemo, useCallback = React.useCallback, useRef = React.useRef, useEffect = React.useEffect;
+    var REC = Recharts;
+
+    var PI = Math.PI, TWO_PI = 2 * PI;
+    var DEG = "\u00B0", THETA = "\u03B8", OMEGA = "\u03C9", PI_SYM = "\u03C0", CDOT = "\u00B7", SQRT = "\u221A", SUB1 = "\u2081", SUB2 = "\u2082", MU = "\u03BC";
+
+    var G = 9.81;
+
+    var C = {
+      bg: "#070c18", panel: "#0a1220", border: "#1a2d4a",
+      accent: "#00d4ff", muted: "#475569", text: "#e2e8f0", textDim: "#94a3b8",
+      warning: "#eab308",
+      vel: "#22c55e", accel: "#ff6b35", force: "#a855f7",
+      tension: "#a855f7", weight: "#ef4444", normal: "#22c55e", friction: "#eab308",
+      obj: "#ff6b35", path: "#1a2d4a",
+    };
+
+    var TABS = [
+      { id: "ucm",     label: "Uniform Circular" },
+      { id: "centrip", label: "Centripetal Force" },
+      { id: "vertical", label: "Vertical Circles" },
+      { id: "banked",  label: "Banked Curves" },
+      { id: "connect", label: "Circular \u2194 SHM" },
+    ];
+
+    function round2(n) { return Math.round(n * 100) / 100; }
+    function round1(n) { return Math.round(n * 10) / 10; }
+    function degToRad(d) { return d * PI / 180; }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SHARED COMPONENTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Panel(props) {
+      return h("div", { style: Object.assign({ background: C.panel, border: "1px solid " + C.border, borderRadius: 8, padding: 14 }, props.style || {}) },
+        props.title && h("div", { style: { fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: C.accent, marginBottom: 10, letterSpacing: 1 } }, props.title),
+        props.children
+      );
+    }
+
+    function Slider(props) {
+      var pct = ((props.value - props.min) / (props.max - props.min)) * 100;
+      return h("div", { style: { marginBottom: 12, opacity: props.disabled ? 0.4 : 1 } },
+        h("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 } },
+          h("span", { style: { color: C.textDim } }, props.label),
+          h("span", { style: { color: C.accent } }, props.value, props.unit && h("span", { style: { color: C.muted, marginLeft: 2 } }, props.unit))
+        ),
+        h("input", { type: "range", min: props.min, max: props.max, step: props.step, value: props.value, disabled: props.disabled,
+          onChange: function(e) { props.onChange(parseFloat(e.target.value)); },
+          style: { width: "100%", accentColor: C.accent, background: "linear-gradient(to right, " + C.accent + " 0%, " + C.accent + " " + pct + "%, " + C.border + " " + pct + "%, " + C.border + " 100%)", height: 4, borderRadius: 2, cursor: props.disabled ? "not-allowed" : "pointer" } })
+      );
+    }
+
+    function MetricRow(props) {
+      return h("div", { style: { display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" } },
+        h("span", { style: { color: C.muted } }, props.label),
+        h("span", null,
+          h("span", { style: { color: props.color || C.text, fontWeight: 500 } }, props.value),
+          h("span", { style: { color: C.muted, marginLeft: 4, fontSize: 10 } }, props.unit)
+        )
+      );
+    }
+
+    function HintBox(props) {
+      if (!props.hints || props.hints.length === 0) return null;
+      return h(Panel, { title: "INSIGHTS" },
+        props.hints.map(function(ht, i) {
+          return h("div", { key: i, style: { display: "flex", gap: 8, marginBottom: 6, fontSize: 11, color: C.textDim, lineHeight: 1.5 } },
+            h("span", { style: { flexShrink: 0 } }, ht.icon), h("span", null, ht.text));
+        })
+      );
+    }
+
+    function EquationBlock(props) {
+      return h("div", { style: { fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.textDim, lineHeight: 1.8, padding: "8px 12px", background: "rgba(0,0,0,0.3)", borderRadius: 6, border: "1px solid " + C.border } },
+        props.lines.map(function(l, i) { return h("div", { key: i, style: l.style || {} }, l.text); })
+      );
+    }
+
+    function TabLayout(props) {
+      return h("div", { style: { display: "flex", gap: 16, flexWrap: "wrap" } },
+        h("div", { style: { width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 } }, props.sliders, props.equations),
+        h("div", { style: { flex: 1, minWidth: 380, display: "flex", flexDirection: "column", gap: 12 } }, props.svg, props.results, props.hints)
+      );
+    }
+
+    function PlayControls(props) {
+      return h("div", { style: { display: "flex", gap: 8, marginTop: 8 } },
+        h("button", { onClick: props.onToggle, style: { background: C.accent, color: C.bg, border: "none", borderRadius: 4, padding: "5px 14px", fontSize: 11, fontFamily: "'JetBrains Mono'", fontWeight: 700, cursor: "pointer" } },
+          props.isPlaying ? "\u23F8 Pause" : "\u25B6 " + (props.playLabel || "Play")),
+        h("button", { onClick: props.onReset, style: { background: "transparent", color: C.textDim, border: "1px solid " + C.border, borderRadius: 4, padding: "5px 12px", fontSize: 11, fontFamily: "'JetBrains Mono'", cursor: "pointer" } }, "\u21BA Reset")
+      );
+    }
+
+    // Animation hook
+    function useAnimLoop(sf) {
+      var speed = sf || 1;
+      var ref = useRef({ raf: null, last: null, t: 0, on: false });
+      var st = useState(0), simT = st[0], setSimT = st[1];
+      var sp = useState(false), playing = sp[0], setPlaying = sp[1];
+
+      var stop = useCallback(function() {
+        if (ref.current.raf) cancelAnimationFrame(ref.current.raf);
+        ref.current.raf = null; ref.current.last = null; ref.current.on = false;
+        setPlaying(false);
+      }, []);
+
+      var tick = useCallback(function(ts) {
+        if (!ref.current.last) { ref.current.last = ts; ref.current.raf = requestAnimationFrame(tick); return; }
+        ref.current.t += ((ts - ref.current.last) / 1000) * speed;
+        ref.current.last = ts;
+        setSimT(ref.current.t);
+        if (ref.current.on) ref.current.raf = requestAnimationFrame(tick);
+      }, [speed]);
+
+      var start = useCallback(function() {
+        ref.current.on = true; ref.current.last = null; setPlaying(true);
+        ref.current.raf = requestAnimationFrame(tick);
+      }, [tick]);
+
+      var toggle = useCallback(function() { if (ref.current.on) stop(); else start(); }, [stop, start]);
+      var reset = useCallback(function() { stop(); ref.current.t = 0; setSimT(0); }, [stop]);
+
+      useEffect(function() { return function() { if (ref.current.raf) cancelAnimationFrame(ref.current.raf); }; }, []);
+
+      return { simT: simT, playing: playing, toggle: toggle, reset: reset };
+    }
+
+    // SVG arrow helper
+    function svgArrow(x1, y1, x2, y2, color, label, labelSide) {
+      var dx = x2 - x1, dy = y2 - y1;
+      var len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 2) return null;
+      var ux = dx / len, uy = dy / len;
+      var px = -uy, py = ux;
+      var hl = 8, hw = 5;
+      var pts = x2 + "," + y2 + " " + (x2 - ux * hl + px * hw) + "," + (y2 - uy * hl + py * hw) + " " + (x2 - ux * hl - px * hw) + "," + (y2 - uy * hl - py * hw);
+      var off = labelSide || 12;
+      var lx = (x1 + x2) / 2 + px * off, ly = (y1 + y2) / 2 + py * off;
+      return h("g", null,
+        h("line", { x1: x1, y1: y1, x2: x2, y2: y2, stroke: color, strokeWidth: 2.5 }),
+        h("polygon", { points: pts, fill: color }),
+        label && h("text", { x: lx, y: ly, fill: color, fontSize: 9, fontFamily: "'JetBrains Mono'", textAnchor: "middle", dominantBaseline: "middle" }, label)
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 1: UNIFORM CIRCULAR MOTION
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_UCM() {
+      var rs = useState(3), r = rs[0], setR = rs[1];
+      var vs = useState(5), v = vs[0], setV = vs[1];
+
+      var anim = useAnimLoop(1);
+      useEffect(function() { anim.reset(); }, [r, v]);
+
+      var omega = v / r;
+      var T = TWO_PI * r / v;
+      var f = 1 / T;
+      var ac = v * v / r;
+
+      var angle = omega * anim.simT;
+      var cx = 220, cy = 150, rPx = 100;
+      var objX = cx + rPx * Math.cos(angle);
+      var objY = cy - rPx * Math.sin(angle);
+
+      // Velocity tangent (perpendicular to radius, in direction of motion)
+      var vScale = 40;
+      var vx = -Math.sin(angle) * vScale;
+      var vy = -Math.cos(angle) * vScale;
+
+      // Acceleration toward center
+      var aScale = 30;
+      var ax = -Math.cos(angle) * aScale;
+      var ay = Math.sin(angle) * aScale;
+
+      var hints = useMemo(function() {
+        return [
+          { icon: "\uD83D\uDD04", text: "The speed is constant, but the VELOCITY is always changing direction. That change in direction IS the centripetal acceleration." },
+          { icon: "\u27A1\uFE0F", text: "Velocity is always tangent to the circle (perpendicular to the radius). Acceleration always points inward toward the center." },
+          { icon: "\uD83C\uDFAF", text: "a_c = v\u00B2/r = " + round2(ac) + " m/s\u00B2. Double the speed \u2192 4x the acceleration. That's why fast turns feel so intense." },
+        ];
+      }, [ac]);
+
+      return h(TabLayout, {
+        sliders: h(Panel, { title: "PARAMETERS" },
+          h(Slider, { label: "Radius (r)", value: r, min: 1, max: 10, step: 0.5, onChange: setR, unit: "m" }),
+          h(Slider, { label: "Speed (v)", value: v, min: 1, max: 20, step: 0.5, onChange: setV, unit: "m/s" })
+        ),
+        equations: h(EquationBlock, { lines: [
+          { text: "Uniform Circular Motion", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+          { text: "v = 2" + PI_SYM + "r/T = " + round2(v) + " m/s" },
+          { text: "a_c = v\u00B2/r = " + round2(ac) + " m/s\u00B2", style: { color: C.accel } },
+          { text: OMEGA + " = v/r = " + round2(omega) + " rad/s" },
+          { text: "T = " + round2(T) + " s, f = " + round2(f) + " Hz" },
+        ]}),
+        svg: h(Panel, { title: "CIRCULAR PATH" },
+          h("svg", { viewBox: "0 0 440 300", style: { width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 } },
+            // Circle path
+            h("circle", { cx: cx, cy: cy, r: rPx, fill: "none", stroke: C.path, strokeWidth: 2, strokeDasharray: "6 4" }),
+            // Center
+            h("circle", { cx: cx, cy: cy, r: 3, fill: C.textDim }),
+            // Radius line
+            h("line", { x1: cx, y1: cy, x2: objX, y2: objY, stroke: C.textDim, strokeWidth: 1, strokeDasharray: "4 3" }),
+            h("text", { x: (cx + objX) / 2 + 8, y: (cy + objY) / 2 - 8, fill: C.textDim, fontSize: 9, fontFamily: "'JetBrains Mono'" }, "r"),
+            // Object
+            h("circle", { cx: objX, cy: objY, r: 10, fill: C.obj, opacity: 0.9 }),
+            // Velocity arrow (tangent)
+            svgArrow(objX, objY, objX + vx, objY + vy, C.vel, "v", 14),
+            // Acceleration arrow (toward center)
+            svgArrow(objX, objY, objX + ax, objY + ay, C.accel, "a_c", -14)
+          ),
+          h(PlayControls, { isPlaying: anim.playing, onToggle: anim.toggle, onReset: anim.reset, playLabel: "Orbit" })
+        ),
+        results: h(Panel, { title: "LIVE READOUT" },
+          h(MetricRow, { label: "Speed (v)", value: round2(v), unit: "m/s", color: C.vel }),
+          h(MetricRow, { label: "Centripetal accel", value: round2(ac), unit: "m/s\u00B2", color: C.accel }),
+          h(MetricRow, { label: "Period (T)", value: round2(T), unit: "s", color: C.accent }),
+          h(MetricRow, { label: "Frequency (f)", value: round2(f), unit: "Hz" }),
+          h(MetricRow, { label: OMEGA, value: round2(omega), unit: "rad/s" }),
+          h(MetricRow, { label: "Angle", value: round1((angle * 180 / PI) % 360), unit: DEG, color: C.obj })
+        ),
+        hints: h(HintBox, { hints: hints }),
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 2: CENTRIPETAL FORCE
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Centripetal() {
+      var ms = useState(2), mass = ms[0], setMass = ms[1];
+      var rs = useState(4), r = rs[0], setR = rs[1];
+      var vs = useState(6), v = vs[0], setV = vs[1];
+      var ps = useState("string"), preset = ps[0], setPreset = ps[1];
+
+      var anim = useAnimLoop(1);
+      useEffect(function() { anim.reset(); }, [mass, r, v]);
+
+      var ac = v * v / r;
+      var Fc = mass * ac;
+      var omega = v / r;
+      var T = TWO_PI / omega;
+
+      var angle = omega * anim.simT;
+      var cx = 220, cy = 150, rPx = 100;
+      var objX = cx + rPx * Math.cos(angle);
+      var objY = cy - rPx * Math.sin(angle);
+
+      var forceScale = Math.min(50, Fc * 2);
+      var fx = -Math.cos(angle) * forceScale;
+      var fy = Math.sin(angle) * forceScale;
+
+      var presetInfo = {
+        string: { label: "Ball on String", source: "Tension in the string", icon: "\uD83E\uDDF5" },
+        car: { label: "Car on Curve", source: "Static friction between tires and road", icon: "\uD83D\uDE97" },
+        satellite: { label: "Satellite Orbit", source: "Gravitational force from Earth", icon: "\uD83D\uDE80" },
+      };
+      var info = presetInfo[preset];
+
+      var hints = useMemo(function() {
+        return [
+          { icon: info.icon, text: info.label + ": the centripetal force is provided by " + info.source + "." },
+          { icon: "\u2757", text: "There is NO outward 'centrifugal force' on the object. What you feel as 'being thrown outward' is your body wanting to continue in a straight line (inertia)." },
+          { icon: "\uD83D\uDCCA", text: "F_c = mv\u00B2/r = " + round2(Fc) + " N. Double the speed \u2192 4x the force needed. This is why sharp turns at high speed are dangerous." },
+        ];
+      }, [Fc, info]);
+
+      return h(TabLayout, {
+        sliders: h(Panel, { title: "PARAMETERS" },
+          h(Slider, { label: "Mass (m)", value: mass, min: 0.5, max: 20, step: 0.5, onChange: setMass, unit: "kg" }),
+          h(Slider, { label: "Radius (r)", value: r, min: 1, max: 10, step: 0.5, onChange: setR, unit: "m" }),
+          h(Slider, { label: "Speed (v)", value: v, min: 1, max: 20, step: 0.5, onChange: setV, unit: "m/s" }),
+          h("div", { style: { fontFamily: "'Orbitron', sans-serif", fontSize: 10, color: C.accent, marginBottom: 6, marginTop: 8 } }, "SCENARIO"),
+          h("div", { style: { display: "flex", flexWrap: "wrap", gap: 4 } },
+            Object.keys(presetInfo).map(function(key) {
+              return h("button", { key: key, onClick: function() { setPreset(key); },
+                style: { background: preset === key ? C.accent : "transparent", color: preset === key ? C.bg : C.textDim,
+                  border: "1px solid " + (preset === key ? C.accent : C.border), borderRadius: 4, padding: "3px 8px", fontSize: 10,
+                  fontFamily: "'JetBrains Mono'", cursor: "pointer" } }, presetInfo[key].label);
+            })
+          )
+        ),
+        equations: h(EquationBlock, { lines: [
+          { text: "Centripetal Force", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+          { text: "F_c = mv\u00B2/r = " + round2(Fc) + " N", style: { color: C.force } },
+          { text: "F_c = m" + OMEGA + "\u00B2r = " + round2(mass * omega * omega * r) + " N" },
+          { text: "a_c = v\u00B2/r = " + round2(ac) + " m/s\u00B2" },
+          { text: "Source: " + info.source },
+        ]}),
+        svg: h(Panel, { title: "FORCE DIAGRAM" },
+          h("svg", { viewBox: "0 0 440 300", style: { width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 } },
+            h("circle", { cx: cx, cy: cy, r: rPx, fill: "none", stroke: C.path, strokeWidth: 2, strokeDasharray: "6 4" }),
+            h("circle", { cx: cx, cy: cy, r: 3, fill: C.textDim }),
+            h("line", { x1: cx, y1: cy, x2: objX, y2: objY, stroke: C.textDim, strokeWidth: 1, strokeDasharray: "4 3" }),
+            h("circle", { cx: objX, cy: objY, r: 12, fill: C.obj, opacity: 0.9 }),
+            h("text", { x: objX, y: objY + 4, fill: "#fff", fontSize: 8, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, mass + "kg"),
+            // Force arrow toward center
+            svgArrow(objX, objY, objX + fx, objY + fy, C.force, "F_c=" + round1(Fc) + "N", -16),
+            // Velocity tangent
+            (function() {
+              var sc = 35;
+              var vx = -Math.sin(angle) * sc, vy = -Math.cos(angle) * sc;
+              return svgArrow(objX, objY, objX + vx, objY + vy, C.vel, "v", 14);
+            })()
+          ),
+          h(PlayControls, { isPlaying: anim.playing, onToggle: anim.toggle, onReset: anim.reset, playLabel: "Orbit" })
+        ),
+        results: h(Panel, { title: "RESULTS" },
+          h(MetricRow, { label: "Centripetal Force", value: round2(Fc), unit: "N", color: C.force }),
+          h(MetricRow, { label: "Centripetal accel", value: round2(ac), unit: "m/s\u00B2", color: C.accel }),
+          h(MetricRow, { label: "Speed", value: round2(v), unit: "m/s", color: C.vel }),
+          h(MetricRow, { label: "Period", value: round2(T), unit: "s" }),
+          h(MetricRow, { label: "Scenario", value: info.label, unit: "" })
+        ),
+        hints: h(HintBox, { hints: hints }),
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 3: VERTICAL CIRCLES
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Vertical() {
+      var ms = useState(1), mass = ms[0], setMass = ms[1];
+      var rs = useState(3), r = rs[0], setR = rs[1];
+      var vs = useState(8), v = vs[0], setV = vs[1];
+
+      var anim = useAnimLoop(0.8);
+      useEffect(function() { anim.reset(); }, [mass, r, v]);
+
+      var vMin = Math.sqrt(G * r);
+      var omega = v / r;
+
+      // Angle measured from bottom (0 = bottom, PI = top)
+      var angle = omega * anim.simT;
+      var cx = 220, cy = 160, rPx = 100;
+      // Position: start at bottom, go counterclockwise
+      var posAngle = angle - PI / 2; // shift so 0 = bottom
+      var objX = cx + rPx * Math.cos(posAngle);
+      var objY = cy - rPx * Math.sin(posAngle);
+
+      // Speed at current position using energy conservation
+      // v^2 = v_bottom^2 - 2g*h, where h = r + r*sin(posAngle - PI/2) measured from bottom
+      var hFromBottom = r * (1 - Math.sin(posAngle));
+      var vSq = Math.max(v * v - 2 * G * hFromBottom, 0);
+      var vCur = Math.sqrt(vSq);
+      var ac = vSq / r;
+
+      // At current position, resolve forces
+      // Weight component toward center depends on position
+      var sinA = Math.sin(posAngle);
+      // Tension: T = m*v^2/r - mg*sin(angle from horizontal)
+      // More precisely: radial equation: T - mg*cos(angle_from_top) = mv^2/r
+      // angle_from_top = PI - posAngle... let's simplify:
+      // At bottom: T - mg = mv^2/r => T = m(v^2/r + g)
+      // At top: T + mg = mv^2/r => T = m(v^2/r - g)
+      var cosFromCenter = -Math.sin(posAngle); // component of g toward center
+      var T_tension = mass * ac + mass * G * cosFromCenter;
+      var atTop = Math.abs(Math.sin(posAngle) - (-1)) < 0.3; // near top
+      var atBottom = Math.abs(Math.sin(posAngle) - 1) < 0.3; // near bottom
+
+      // Values at specific positions
+      var vTop = Math.sqrt(Math.max(v * v - 4 * G * r, 0));
+      var Ttop = mass * (vTop * vTop / r - G);
+      var Tbottom = mass * (v * v / r + G);
+      var willComplete = v >= vMin;
+
+      var hints = useMemo(function() {
+        var out = [];
+        out.push({ icon: "\uD83C\uDFA2", text: "v_min at top = " + SQRT + "(gr) = " + round2(vMin) + " m/s. Below this speed, the ball can't complete the loop \u2014 the string goes slack at the top." });
+        if (willComplete) out.push({ icon: "\u2705", text: "Speed is enough! At the top: T = " + round1(Ttop) + " N. At the bottom: T = " + round1(Tbottom) + " N. The bottom always has the highest tension." });
+        if (!willComplete) out.push({ icon: "\u274C", text: "Not enough speed to complete the loop! Need at least " + round2(vMin) + " m/s at the bottom." });
+        out.push({ icon: "\u2696\uFE0F", text: "At the top, both weight AND tension point inward. At the bottom, tension must overcome weight. That's why T_bottom > T_top." });
+        return out;
+      }, [vMin, willComplete, Ttop, Tbottom]);
+
+      return h(TabLayout, {
+        sliders: h(Panel, { title: "PARAMETERS" },
+          h(Slider, { label: "Mass (m)", value: mass, min: 0.5, max: 10, step: 0.5, onChange: setMass, unit: "kg" }),
+          h(Slider, { label: "Radius (r)", value: r, min: 1, max: 8, step: 0.5, onChange: setR, unit: "m" }),
+          h(Slider, { label: "Speed at bottom (v)", value: v, min: 1, max: 20, step: 0.5, onChange: setV, unit: "m/s" }),
+          h("div", { style: { marginTop: 6, fontSize: 10, color: willComplete ? C.vel : C.warning, fontFamily: "'JetBrains Mono'" } },
+            willComplete ? "\u2705 Completes loop" : "\u274C Needs " + round2(vMin) + " m/s minimum")
+        ),
+        equations: h(EquationBlock, { lines: [
+          { text: "Vertical Loop", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+          { text: "v_min (top) = " + SQRT + "(gr) = " + round2(vMin) + " m/s" },
+          { text: "T_bottom = m(v\u00B2/r + g) = " + round1(Tbottom) + " N" },
+          { text: "T_top = m(v\u00B2/r - g) = " + round1(Math.max(Ttop, 0)) + " N" },
+        ]}),
+        svg: h(Panel, { title: "VERTICAL LOOP" },
+          h("svg", { viewBox: "0 0 440 320", style: { width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 } },
+            h("circle", { cx: cx, cy: cy, r: rPx, fill: "none", stroke: C.path, strokeWidth: 2, strokeDasharray: "6 4" }),
+            h("circle", { cx: cx, cy: cy, r: 3, fill: C.textDim }),
+            // Labels
+            h("text", { x: cx, y: cy - rPx - 10, fill: C.textDim, fontSize: 9, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "TOP"),
+            h("text", { x: cx, y: cy + rPx + 18, fill: C.textDim, fontSize: 9, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "BOTTOM"),
+            // String from center to object
+            h("line", { x1: cx, y1: cy, x2: objX, y2: objY, stroke: C.string, strokeWidth: 2 }),
+            // Object
+            h("circle", { cx: objX, cy: objY, r: 10, fill: C.obj, opacity: 0.9 }),
+            // Weight arrow (always down)
+            svgArrow(objX, objY, objX, objY + 30, C.weight, "mg", 16),
+            // Tension arrow (toward center)
+            (function() {
+              var tdx = cx - objX, tdy = cy - objY;
+              var tLen = Math.sqrt(tdx * tdx + tdy * tdy);
+              if (tLen < 1) return null;
+              var tScale = Math.max(Math.min(Math.abs(T_tension) * 1.5, 45), 0);
+              return svgArrow(objX, objY, objX + (tdx / tLen) * tScale, objY + (tdy / tLen) * tScale, C.tension, "T", -16);
+            })(),
+            // Speed label
+            h("text", { x: 30, y: 25, fill: C.vel, fontSize: 10, fontFamily: "'JetBrains Mono'" }, "v = " + round1(vCur) + " m/s"),
+            h("text", { x: 30, y: 40, fill: C.tension, fontSize: 10, fontFamily: "'JetBrains Mono'" }, "T = " + round1(Math.max(T_tension, 0)) + " N")
+          ),
+          h(PlayControls, { isPlaying: anim.playing, onToggle: anim.toggle, onReset: anim.reset, playLabel: "Loop" })
+        ),
+        results: h(Panel, { title: "RESULTS" },
+          h(MetricRow, { label: "v_min (top)", value: round2(vMin), unit: "m/s", color: C.warning }),
+          h(MetricRow, { label: "v at bottom", value: round2(v), unit: "m/s", color: C.vel }),
+          h(MetricRow, { label: "v at top", value: round2(vTop), unit: "m/s", color: C.vel }),
+          h(MetricRow, { label: "T at bottom", value: round1(Tbottom), unit: "N", color: C.tension }),
+          h(MetricRow, { label: "T at top", value: round1(Math.max(Ttop, 0)), unit: "N", color: C.tension }),
+          h(MetricRow, { label: "Current speed", value: round1(vCur), unit: "m/s", color: C.vel }),
+          h(MetricRow, { label: "Completes loop?", value: willComplete ? "YES" : "NO", unit: "", color: willComplete ? C.vel : C.warning })
+        ),
+        hints: h(HintBox, { hints: hints }),
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 4: BANKED CURVES
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Banked() {
+      var vs = useState(15), v = vs[0], setV = vs[1];
+      var rs = useState(50), r = rs[0], setR = rs[1];
+      var ms = useState(1000), mass = ms[0], setMass = ms[1];
+      var mus = useState(0.3), muS = mus[0], setMuS = mus[1];
+
+      var idealAngle = Math.atan(v * v / (r * G)) * 180 / PI;
+      var W = mass * G;
+      var Fc = mass * v * v / r;
+      var cosA = Math.cos(degToRad(idealAngle));
+      var N = cosA > 0.01 ? W / cosA : W;
+      var tanB = Math.tan(degToRad(idealAngle));
+      var d1 = 1 - muS * tanB;
+      var d2 = 1 + muS * tanB;
+      var maxV = d1 > 0.01 ? round1(Math.sqrt(r * G * (tanB + muS) / d1)) : "N/A";
+      var minV = d2 > 0.01 ? round1(Math.sqrt(Math.max(r * G * (tanB - muS) / d2, 0))) : "0";
+
+      var rad = degToRad(idealAngle);
+      var roadCx = 250, roadCy = 180;
+
+      return h(TabLayout, {
+        sliders: h(Panel, { title: "PARAMETERS" },
+          h(Slider, { label: "Speed (v)", value: v, min: 5, max: 40, step: 1, onChange: setV, unit: "m/s" }),
+          h(Slider, { label: "Curve Radius (r)", value: r, min: 10, max: 200, step: 5, onChange: setR, unit: "m" }),
+          h(Slider, { label: "Vehicle Mass (m)", value: mass, min: 500, max: 5000, step: 100, onChange: setMass, unit: "kg" }),
+          h(Slider, { label: MU + "s (friction coeff)", value: muS, min: 0.1, max: 0.8, step: 0.05, onChange: setMuS, unit: "" })
+        ),
+        equations: h(EquationBlock, { lines: [
+          { text: "Banked Curve", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+          { text: "tan(" + THETA + ") = v\u00B2/(rg)" },
+          { text: THETA + " = " + round1(idealAngle) + DEG + " (ideal, no friction)", style: { color: C.accent } },
+          { text: "F_c = mv\u00B2/r = " + round1(Fc) + " N" },
+          { text: "With " + MU + "s=" + muS + ": safe " + minV + " \u2013 " + maxV + " m/s", style: { color: C.friction } },
+        ]}),
+        svg: h(Panel, { title: "CROSS-SECTION" },
+          h("svg", { viewBox: "0 0 500 280", style: { width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 } },
+            h("line", { x1: roadCx - 100 * Math.cos(rad), y1: roadCy + 100 * Math.sin(rad),
+              x2: roadCx + 100 * Math.cos(rad), y2: roadCy - 100 * Math.sin(rad),
+              stroke: C.text, strokeWidth: 4 }),
+            h("line", { x1: 50, y1: roadCy + 30, x2: 450, y2: roadCy + 30, stroke: C.border, strokeWidth: 1 }),
+            h("text", { x: roadCx + 70, y: roadCy - 5, fill: C.accent, fontSize: 11, fontFamily: "'JetBrains Mono'" }, round1(idealAngle) + DEG),
+            h("g", { transform: "translate(" + roadCx + "," + (roadCy - 25) + ") rotate(" + (-idealAngle) + ")" },
+              h("rect", { x: -25, y: -15, width: 50, height: 15, fill: C.panel, stroke: C.obj, strokeWidth: 2, rx: 4 }),
+              h("text", { x: 0, y: -5, fill: C.textDim, fontSize: 7, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, mass + "kg")
+            ),
+            h("line", { x1: roadCx, y1: roadCy - 25, x2: roadCx, y2: roadCy + 20, stroke: C.weight, strokeWidth: 2.5 }),
+            h("text", { x: roadCx + 12, y: roadCy + 18, fill: C.weight, fontSize: 9, fontFamily: "'JetBrains Mono'" }, "mg"),
+            h("line", { x1: roadCx, y1: roadCy - 25, x2: roadCx - 40 * Math.sin(rad), y2: roadCy - 25 - 40 * Math.cos(rad), stroke: C.normal, strokeWidth: 2.5 }),
+            h("text", { x: roadCx - 40 * Math.sin(rad) - 12, y: roadCy - 25 - 40 * Math.cos(rad), fill: C.normal, fontSize: 9, fontFamily: "'JetBrains Mono'" }, "N"),
+            h("line", { x1: roadCx, y1: roadCy - 25, x2: roadCx - 25 * Math.cos(rad), y2: roadCy - 25 + 25 * Math.sin(rad), stroke: C.friction, strokeWidth: 2 }),
+            h("text", { x: roadCx - 25 * Math.cos(rad) - 8, y: roadCy - 25 + 25 * Math.sin(rad) + 12, fill: C.friction, fontSize: 9, fontFamily: "'JetBrains Mono'" }, "f")
+          )
+        ),
+        results: h(Panel, { title: "RESULTS" },
+          h(MetricRow, { label: "Ideal bank angle", value: round1(idealAngle), unit: DEG, color: C.accent }),
+          h(MetricRow, { label: "Centripetal force", value: round1(Fc), unit: "N", color: C.force }),
+          h(MetricRow, { label: "Weight", value: round1(W), unit: "N", color: C.weight }),
+          h(MetricRow, { label: "Normal force", value: round1(N), unit: "N", color: C.normal }),
+          h(MetricRow, { label: "Min safe speed", value: minV, unit: "m/s", color: C.friction }),
+          h(MetricRow, { label: "Max safe speed", value: maxV, unit: "m/s", color: C.friction })
+        ),
+        hints: h(HintBox, { hints: [
+          { icon: "\uD83D\uDEE3\uFE0F", text: "Ideal bank angle: " + round1(idealAngle) + DEG + ". At this angle, no friction needed \u2014 the normal force provides all centripetal force." },
+          { icon: "\uD83D\uDE97", text: "Friction (" + MU + "s=" + muS + ") allows a safe speed range of " + minV + " to " + maxV + " m/s. Without friction, only one speed works perfectly." },
+          { icon: "\u2757", text: "There is NO outward force. The normal force tilts inward on a bank, and its horizontal component provides the centripetal force." },
+        ] }),
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 5: CIRCULAR ↔ SHM CONNECTION
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Connection() {
+      var As = useState(1), A = As[0], setA = As[1];
+      var Ts = useState(3), T = Ts[0], setT = Ts[1];
+
+      var anim = useAnimLoop(1);
+      useEffect(function() { anim.reset(); }, [A, T]);
+
+      var omega = TWO_PI / T;
+      var angle = omega * anim.simT;
+      var x = A * Math.cos(angle);
+      var y = A * Math.sin(angle);
+
+      // Build trace for SHM graph
+      var graphData = useMemo(function() {
+        var pts = [];
+        var n = 150;
+        for (var i = 0; i <= n; i++) {
+          var t = (i / n) * T * 3;
+          pts.push({ t: round2(t), x: round2(A * Math.cos(omega * t)) });
+        }
+        return pts;
+      }, [A, T, omega]);
+
+      var curT = anim.simT % (T * 3);
+
+      var cx = 150, cy = 150, rPx = 80;
+      var dotX = cx + rPx * Math.cos(angle);
+      var dotY = cy - rPx * Math.sin(angle);
+      var projX = cx + rPx * Math.cos(angle); // x projection
+      var projY = cy; // on the horizontal axis
+
+      // SHM oscillator position on right side
+      var shmCy = cy;
+      var shmX = 350 + (x / A) * 60;
+
+      var hints = useMemo(function() {
+        return [
+          { icon: "\uD83D\uDCA1", text: "The x-coordinate of the circling dot traces out a PERFECT cosine wave. Uniform circular motion projected onto one axis IS simple harmonic motion!" },
+          { icon: "\uD83D\uDD17", text: "This is why the same " + OMEGA + " = 2" + PI_SYM + "/T appears in both circular motion and SHM equations. They're the same math." },
+          { icon: "\uD83C\uDF0A", text: "Every oscillation \u2014 pendulums, springs, sound waves, AC electricity \u2014 can be understood as the 'shadow' of something going in a circle." },
+        ];
+      }, []);
+
+      return h(TabLayout, {
+        sliders: h(Panel, { title: "PARAMETERS" },
+          h(Slider, { label: "Amplitude / Radius (A)", value: A, min: 0.5, max: 3, step: 0.1, onChange: setA, unit: "m" }),
+          h(Slider, { label: "Period (T)", value: T, min: 1, max: 5, step: 0.1, onChange: setT, unit: "s" })
+        ),
+        equations: h(EquationBlock, { lines: [
+          { text: "The Connection", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+          { text: "Circle: x = A cos(" + OMEGA + "t), y = A sin(" + OMEGA + "t)" },
+          { text: "SHM: x(t) = A cos(" + OMEGA + "t)", style: { color: C.obj } },
+          { text: "Same equation! SHM = x-projection of circular motion", style: { color: C.accent } },
+        ]}),
+        svg: h(React.Fragment, null,
+          h(Panel, { title: "CIRCLE \u2194 SHM" },
+            h("svg", { viewBox: "0 0 500 300", style: { width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 } },
+              // Circle
+              h("circle", { cx: cx, cy: cy, r: rPx, fill: "none", stroke: C.path, strokeWidth: 2, strokeDasharray: "6 4" }),
+              h("circle", { cx: cx, cy: cy, r: 2, fill: C.textDim }),
+              // Axes
+              h("line", { x1: cx - rPx - 15, y1: cy, x2: cx + rPx + 15, y2: cy, stroke: C.border, strokeWidth: 1 }),
+              h("line", { x1: cx, y1: cy - rPx - 15, x2: cx, y2: cy + rPx + 15, stroke: C.border, strokeWidth: 1 }),
+              // Dot on circle
+              h("circle", { cx: dotX, cy: dotY, r: 8, fill: C.obj, opacity: 0.9 }),
+              // Projection line to x-axis
+              h("line", { x1: dotX, y1: dotY, x2: dotX, y2: cy, stroke: C.obj, strokeWidth: 1, strokeDasharray: "3 3" }),
+              // X projection dot
+              h("circle", { cx: dotX, cy: cy, r: 6, fill: C.accent }),
+              // Horizontal line from projection to SHM oscillator
+              h("line", { x1: dotX, y1: cy, x2: shmX, y2: shmCy, stroke: C.accent, strokeWidth: 1, strokeDasharray: "3 3", opacity: 0.5 }),
+              // SHM oscillator (vertical line + dot)
+              h("line", { x1: 290, y1: cy - rPx - 10, x2: 290, y2: cy + rPx + 10, stroke: C.border, strokeWidth: 1 }),
+              h("line", { x1: 290, y1: shmCy, x2: 410, y2: shmCy, stroke: C.border, strokeWidth: 1, strokeDasharray: "4 3" }),
+              h("rect", { x: shmX - 12, y: shmCy - 12, width: 24, height: 24, fill: C.panel, stroke: C.accent, strokeWidth: 2, rx: 4 }),
+              // Labels
+              h("text", { x: cx, y: 25, fill: C.textDim, fontSize: 10, fontFamily: "'Orbitron'", textAnchor: "middle" }, "CIRCULAR MOTION"),
+              h("text", { x: 350, y: 25, fill: C.textDim, fontSize: 10, fontFamily: "'Orbitron'", textAnchor: "middle" }, "SHM"),
+              h("text", { x: cx, y: cy + rPx + 30, fill: C.obj, fontSize: 9, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "x = " + round2(x) + " m")
+            ),
+            h(PlayControls, { isPlaying: anim.playing, onToggle: anim.toggle, onReset: anim.reset })
+          ),
+          h(Panel, { title: "X-PROJECTION = SHM WAVE" },
+            h(REC.ResponsiveContainer, { width: "100%", height: 140 },
+              h(REC.LineChart, { data: graphData, margin: { top: 5, right: 20, bottom: 5, left: 10 } },
+                h(REC.CartesianGrid, { stroke: C.border, strokeDasharray: "3 3" }),
+                h(REC.XAxis, { dataKey: "t", type: "number", domain: [0, T * 3], tick: { fill: C.muted, fontSize: 9 } }),
+                h(REC.YAxis, { domain: [-A * 1.2, A * 1.2], tick: { fill: C.muted, fontSize: 9 } }),
+                h(REC.ReferenceLine, { y: 0, stroke: C.border }),
+                h(REC.Line, { dataKey: "x", stroke: C.obj, strokeWidth: 2, dot: false, isAnimationActive: false }),
+                anim.playing && h(REC.ReferenceLine, { x: round2(curT), stroke: C.text, strokeDasharray: "3 3" })
+              )
+            )
+          )
+        ),
+        results: h(Panel, { title: "LIVE READOUT" },
+          h(MetricRow, { label: "x (projection)", value: round2(x), unit: "m", color: C.obj }),
+          h(MetricRow, { label: "y (projection)", value: round2(y), unit: "m" }),
+          h(MetricRow, { label: "Angle", value: round1((angle * 180 / PI) % 360), unit: DEG }),
+          h(MetricRow, { label: "Period", value: round2(T), unit: "s" }),
+          h(MetricRow, { label: OMEGA, value: round2(omega), unit: "rad/s" }),
+          h(MetricRow, { label: "Time", value: round1(anim.simT), unit: "s" })
+        ),
+        hints: h(HintBox, { hints: hints }),
+      });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MAIN COMPONENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function CircularSimulator() {
+      var ts = useState("ucm"), activeTab = ts[0], setActiveTab = ts[1];
+
+      var tabMap = { ucm: Tab_UCM, centrip: Tab_Centripetal, vertical: Tab_Vertical, banked: Tab_Banked, connect: Tab_Connection };
+      var Active = tabMap[activeTab];
+
+      return h("div", { style: { background: C.bg, color: C.text, minHeight: "100vh", padding: "20px 24px", fontFamily: "'JetBrains Mono', monospace" } },
+        h("div", { style: { textAlign: "center", marginBottom: 16 } },
+          h("h1", { style: { fontFamily: "'Orbitron', sans-serif", fontSize: 20, fontWeight: 700, color: C.accent, letterSpacing: 2, marginBottom: 4 } }, "CIRCULAR MOTION & CENTRIPETAL FORCE"),
+          h("p", { style: { color: C.muted, fontSize: 12 } }, "Orbits, loops, banked turns, and the link to SHM")
+        ),
+        h("div", { style: { display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 16, justifyContent: "center" } },
+          TABS.map(function(tab) {
+            return h("button", { key: tab.id, onClick: function() { setActiveTab(tab.id); },
+              style: { background: activeTab === tab.id ? C.accent : "transparent", color: activeTab === tab.id ? C.bg : C.textDim,
+                border: "1px solid " + (activeTab === tab.id ? C.accent : C.border), borderRadius: 6, padding: "6px 14px", fontSize: 11,
+                fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", fontWeight: activeTab === tab.id ? 700 : 400, transition: "all 0.15s" } },
+              tab.label);
+          })
+        ),
+        h(Active)
+      );
+    }
+
+    var root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(h(CircularSimulator));
+  </script>
+</body>
+</html>

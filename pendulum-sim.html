@@ -1,0 +1,887 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pendulums &amp; Simple Harmonic Motion</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.15.3/umd/Recharts.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #070c18; overflow-x: hidden; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; outline: none; height: 4px; border-radius: 2px; }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #00d4ff; cursor: pointer; border: 2px solid #070c18;
+    }
+    input[type="range"]:disabled::-webkit-slider-thumb { background: #475569; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div style="background:#070c18;padding:8px 24px;font-family:'JetBrains Mono',monospace;">
+    <a href="index.html" style="color:#475569;font-size:11px;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00d4ff'" onmouseout="this.style.color='#475569'">&larr; Physics Explorer</a>
+  </div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useCallback, useRef, useEffect } = React;
+    const { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, ReferenceLine } = Recharts;
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONSTANTS
+    // ═══════════════════════════════════════════════════════════════
+
+    const PI = Math.PI;
+    const TWO_PI = 2 * PI;
+    const DEG = "\u00B0";
+    const THETA = "\u03B8";
+    const OMEGA = "\u03C9";
+    const PI_SYM = "\u03C0";
+    const CDOT = "\u00B7";
+    const SQRT = "\u221A";
+    const SUB1 = "\u2081";
+    const SUB2 = "\u2082";
+    const MU = "\u03BC";
+
+    const GRAVITY_PRESETS = {
+      Earth:   { g: 9.81,  label: "Earth" },
+      Moon:    { g: 1.62,  label: "Moon" },
+      Mars:    { g: 3.72,  label: "Mars" },
+      Jupiter: { g: 24.79, label: "Jupiter" },
+    };
+
+    const C = {
+      bg: "#070c18", panel: "#0a1220", border: "#1a2d4a",
+      accent: "#00d4ff", muted: "#475569", text: "#e2e8f0", textDim: "#94a3b8",
+      warning: "#eab308",
+      pos: "#ff6b35",      // position / angle — orange
+      vel: "#22c55e",      // velocity — green
+      accel: "#a855f7",    // acceleration — purple
+      ke: "#ff6b35",       // kinetic energy
+      pe: "#a855f7",       // potential energy
+      total: "#00d4ff",    // total energy
+      string: "#94a3b8",   // pendulum string
+      bob: "#ff6b35",      // pendulum bob
+      spring: "#22c55e",   // spring color
+      damped: "#ef4444",   // damping / envelope
+    };
+
+    const TABS = [
+      { id: "pendulum",  label: "Simple Pendulum" },
+      { id: "massspring", label: "Mass-Spring" },
+      { id: "graphs",    label: "SHM Graphs" },
+      { id: "damped",    label: "Damped Oscillations" },
+      { id: "lab",       label: "Pendulum Lab" },
+    ];
+
+    function round2(n) { return Math.round(n * 100) / 100; }
+    function round1(n) { return Math.round(n * 10) / 10; }
+    function degToRad(d) { return d * PI / 180; }
+    function radToDeg(r) { return r * 180 / PI; }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SHARED COMPONENTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Panel({ title, children, style }) {
+      return (
+        <div style={{ background: C.panel, border: "1px solid " + C.border, borderRadius: 8, padding: 14, ...style }}>
+          {title && <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: C.accent, marginBottom: 10, letterSpacing: 1 }}>{title}</div>}
+          {children}
+        </div>
+      );
+    }
+
+    function Slider({ label, value, min, max, step, onChange, unit, disabled }) {
+      var pct = ((value - min) / (max - min)) * 100;
+      return (
+        <div style={{ marginBottom: 12, opacity: disabled ? 0.4 : 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+            <span style={{ color: C.textDim }}>{label}</span>
+            <span style={{ color: C.accent }}>{value}{unit && <span style={{ color: C.muted, marginLeft: 2 }}>{unit}</span>}</span>
+          </div>
+          <input type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+            onChange={function(e) { onChange(parseFloat(e.target.value)); }}
+            style={{ width: "100%", accentColor: C.accent,
+              background: "linear-gradient(to right, " + C.accent + " 0%, " + C.accent + " " + pct + "%, " + C.border + " " + pct + "%, " + C.border + " 100%)",
+              height: 4, borderRadius: 2, cursor: disabled ? "not-allowed" : "pointer" }} />
+        </div>
+      );
+    }
+
+    function MetricRow({ label, value, unit, color }) {
+      return (
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ color: C.muted }}>{label}</span>
+          <span>
+            <span style={{ color: color || C.text, fontWeight: 500 }}>{value}</span>
+            <span style={{ color: C.muted, marginLeft: 4, fontSize: 10 }}>{unit}</span>
+          </span>
+        </div>
+      );
+    }
+
+    function HintBox({ hints }) {
+      if (!hints || hints.length === 0) return null;
+      return (
+        <Panel title="INSIGHTS">
+          {hints.map(function(h, i) {
+            return <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 11, color: C.textDim, lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>{h.icon}</span><span>{h.text}</span>
+            </div>;
+          })}
+        </Panel>
+      );
+    }
+
+    function EquationBlock({ lines }) {
+      return (
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.textDim, lineHeight: 1.8, padding: "8px 12px", background: "rgba(0,0,0,0.3)", borderRadius: 6, border: "1px solid " + C.border }}>
+          {lines.map(function(l, i) { return <div key={i} style={l.style || {}}>{l.text}</div>; })}
+        </div>
+      );
+    }
+
+    function TabLayout({ sliders, svg, results, equations, hints }) {
+      return (
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+            {sliders}
+            {equations}
+          </div>
+          <div style={{ flex: 1, minWidth: 380, display: "flex", flexDirection: "column", gap: 12 }}>
+            {svg}
+            {results}
+            {hints}
+          </div>
+        </div>
+      );
+    }
+
+    // Playback buttons
+    function PlayControls({ isPlaying, onToggle, onReset, playLabel }) {
+      return (
+        <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+          <button onClick={onToggle}
+            style={{ background: C.accent, color: C.bg, border: "none", borderRadius: 4, padding: "5px 14px", fontSize: 11, fontFamily: "'JetBrains Mono'", fontWeight: 700, cursor: "pointer" }}>
+            {isPlaying ? "\u23F8 Pause" : "\u25B6 " + (playLabel || "Play")}
+          </button>
+          <button onClick={onReset}
+            style={{ background: "transparent", color: C.textDim, border: "1px solid " + C.border, borderRadius: 4, padding: "5px 12px", fontSize: 11, fontFamily: "'JetBrains Mono'", cursor: "pointer" }}>
+            &#8634; Reset
+          </button>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ANIMATION HOOK
+    // ═══════════════════════════════════════════════════════════════
+
+    function useAnimLoop(speedFactor) {
+      var sf = speedFactor || 1;
+      var ref = useRef({ raf: null, last: null, t: 0, playing: false });
+      var [simT, setSimT] = useState(0);
+      var [playing, setPlaying] = useState(false);
+
+      var stop = useCallback(function() {
+        if (ref.current.raf) cancelAnimationFrame(ref.current.raf);
+        ref.current.raf = null; ref.current.last = null; ref.current.playing = false;
+        setPlaying(false);
+      }, []);
+
+      var tick = useCallback(function(ts) {
+        if (!ref.current.last) { ref.current.last = ts; ref.current.raf = requestAnimationFrame(tick); return; }
+        var dt = (ts - ref.current.last) / 1000;
+        ref.current.last = ts;
+        ref.current.t += dt * sf;
+        setSimT(ref.current.t);
+        if (ref.current.playing) ref.current.raf = requestAnimationFrame(tick);
+      }, [sf]);
+
+      var start = useCallback(function() {
+        ref.current.playing = true; ref.current.last = null;
+        setPlaying(true);
+        ref.current.raf = requestAnimationFrame(tick);
+      }, [tick]);
+
+      var toggle = useCallback(function() { if (ref.current.playing) stop(); else start(); }, [stop, start]);
+
+      var reset = useCallback(function() { stop(); ref.current.t = 0; setSimT(0); }, [stop]);
+
+      useEffect(function() { return function() { if (ref.current.raf) cancelAnimationFrame(ref.current.raf); }; }, []);
+
+      return { simT: simT, playing: playing, toggle: toggle, reset: reset, setT: function(v) { ref.current.t = v; setSimT(v); } };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 1: SIMPLE PENDULUM
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Pendulum() {
+      var [L, setL] = useState(2);
+      var [theta0Deg, setTheta0Deg] = useState(30);
+      var [mass, setMass] = useState(1);
+      var g = 9.81;
+
+      var anim = useAnimLoop(1);
+
+      useEffect(function() { anim.reset(); }, [L, theta0Deg, mass]);
+
+      var theta0 = degToRad(theta0Deg);
+      var T = TWO_PI * Math.sqrt(L / g);
+      var omegaN = Math.sqrt(g / L);
+
+      // Current state
+      var theta = theta0 * Math.cos(omegaN * anim.simT);
+      var omega = -theta0 * omegaN * Math.sin(omegaN * anim.simT);
+      var h = L * (1 - Math.cos(theta));
+      var PE = mass * g * h;
+      var KE = 0.5 * mass * (L * omega) * (L * omega);
+      var totalE = 0.5 * mass * g * L * theta0 * theta0; // small angle approx
+
+      // SVG pendulum
+      var pivotX = 250, pivotY = 40;
+      var armLen = 140;
+      var bobX = pivotX + armLen * Math.sin(theta);
+      var bobY = pivotY + armLen * Math.cos(theta);
+
+      var hints = useMemo(function() {
+        var out = [];
+        out.push({ icon: "\uD83D\uDD04", text: "T = 2" + PI_SYM + SQRT + "(L/g) = " + round2(T) + "s. The period depends ONLY on length and gravity \u2014 not mass or amplitude (for small angles)." });
+        if (theta0Deg >= 40) out.push({ icon: "\u26A0\uFE0F", text: "At large angles, the small-angle approximation (sin" + THETA + " \u2248 " + THETA + ") breaks down. The real period is slightly longer than predicted." });
+        out.push({ icon: "\u26A1", text: "Watch the energy: KE is maximum at the bottom (fastest), PE is maximum at the sides (highest). Total energy stays constant." });
+        return out;
+      }, [T, theta0Deg]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Length (L)" value={L} min={0.5} max={5} step={0.1} onChange={setL} unit="m" />
+              <Slider label={"Initial Angle (" + THETA + "\u2080)"} value={theta0Deg} min={5} max={80} step={1} onChange={setTheta0Deg} unit={DEG} />
+              <Slider label="Mass (m)" value={mass} min={0.1} max={10} step={0.1} onChange={setMass} unit="kg" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Simple Pendulum", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: "T = 2" + PI_SYM + SQRT + "(L/g) = " + round2(T) + " s" },
+              { text: THETA + "(t) = " + THETA + "\u2080 cos(" + OMEGA + "t)" },
+              { text: OMEGA + " = " + SQRT + "(g/L) = " + round2(omegaN) + " rad/s" },
+            ]} />
+          }
+          svg={
+            <Panel title="PENDULUM">
+              <svg viewBox="0 0 500 280" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                {/* Pivot */}
+                <line x1={200} y1={pivotY} x2={300} y2={pivotY} stroke={C.border} strokeWidth={2} />
+                <circle cx={pivotX} cy={pivotY} r={4} fill={C.textDim} />
+                {/* Equilibrium line */}
+                <line x1={pivotX} y1={pivotY} x2={pivotX} y2={pivotY + armLen + 20} stroke={C.border} strokeWidth={1} strokeDasharray="4 3" />
+                {/* String */}
+                <line x1={pivotX} y1={pivotY} x2={bobX} y2={bobY} stroke={C.string} strokeWidth={2} />
+                {/* Bob */}
+                <circle cx={bobX} cy={bobY} r={14} fill={C.bob} opacity={0.9} />
+                <text x={bobX} y={bobY + 4} fill="#fff" fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">{mass}kg</text>
+                {/* Angle arc */}
+                {Math.abs(theta) > 0.02 && (
+                  <path d={"M " + pivotX + "," + (pivotY + 30) + " A 30 30 0 0 " + (theta > 0 ? "1" : "0") + " " + (pivotX + 30 * Math.sin(theta)) + "," + (pivotY + 30 * Math.cos(theta))}
+                    fill="none" stroke={C.pos} strokeWidth={1.5} />
+                )}
+                {/* Energy bars */}
+                {(function() {
+                  var maxE = Math.max(totalE, 0.01);
+                  var barH = 100;
+                  var peH = (PE / maxE) * barH;
+                  var keH = (KE / maxE) * barH;
+                  var bx = 420, by = 220;
+                  return React.createElement("g", null,
+                    React.createElement("rect", { x: bx, y: by - peH, width: 20, height: Math.max(peH, 1), fill: C.pe, rx: 2 }),
+                    React.createElement("text", { x: bx + 10, y: by + 14, fill: C.pe, fontSize: 8, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "PE"),
+                    React.createElement("rect", { x: bx + 30, y: by - keH, width: 20, height: Math.max(keH, 1), fill: C.ke, rx: 2 }),
+                    React.createElement("text", { x: bx + 40, y: by + 14, fill: C.ke, fontSize: 8, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "KE")
+                  );
+                })()}
+                {/* Live angle label */}
+                <text x={pivotX + 45} y={pivotY + 25} fill={C.pos} fontSize={10} fontFamily="'JetBrains Mono'">{round1(radToDeg(theta))}{DEG}</text>
+              </svg>
+              <PlayControls isPlaying={anim.playing} onToggle={anim.toggle} onReset={anim.reset} playLabel="Swing" />
+            </Panel>
+          }
+          results={
+            <Panel title="LIVE READOUT">
+              <MetricRow label="Period (T)" value={round2(T)} unit="s" color={C.accent} />
+              <MetricRow label={"Angle (" + THETA + ")"} value={round1(radToDeg(theta))} unit={DEG} color={C.pos} />
+              <MetricRow label={"Angular vel (" + OMEGA + ")"} value={round2(omega)} unit="rad/s" color={C.vel} />
+              <MetricRow label="Height (h)" value={round2(h)} unit="m" />
+              <MetricRow label="KE" value={round2(KE)} unit="J" color={C.ke} />
+              <MetricRow label="PE" value={round2(PE)} unit="J" color={C.pe} />
+              <MetricRow label="Total E" value={round2(KE + PE)} unit="J" color={C.total} />
+              <MetricRow label="Time" value={round1(anim.simT)} unit="s" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 2: MASS-SPRING OSCILLATOR
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_MassSpring() {
+      var [k, setK] = useState(50);
+      var [m, setM] = useState(2);
+      var [A, setA] = useState(0.3);
+
+      var anim = useAnimLoop(1);
+
+      useEffect(function() { anim.reset(); }, [k, m, A]);
+
+      var omegaN = Math.sqrt(k / m);
+      var T = TWO_PI / omegaN;
+      var x = A * Math.cos(omegaN * anim.simT);
+      var v = -A * omegaN * Math.sin(omegaN * anim.simT);
+      var PE = 0.5 * k * x * x;
+      var KE = 0.5 * m * v * v;
+      var totalE = 0.5 * k * A * A;
+
+      // SVG
+      var wallX = 60, springY = 100, restX = 250;
+      var blockW = 40, blockH = 40;
+      var blockCx = restX + x * 300;
+      // Spring coil path
+      var springPath = useMemo(function() {
+        var endX = blockCx - blockW / 2;
+        var startX = wallX + 20;
+        var len = Math.max(endX - startX, 20);
+        var coils = 14;
+        var dx = len / coils;
+        var d = "M " + startX + "," + springY;
+        for (var i = 0; i < coils; i++) {
+          var dir = i % 2 === 0 ? -1 : 1;
+          d += " L " + (startX + (i + 1) * dx) + "," + (springY + dir * 10);
+        }
+        d += " L " + endX + "," + springY;
+        return d;
+      }, [blockCx]);
+
+      var hints = useMemo(function() {
+        var out = [];
+        out.push({ icon: "\uD83D\uDD04", text: "T = 2" + PI_SYM + SQRT + "(m/k) = " + round2(T) + "s. Unlike a pendulum, the spring period depends on MASS, not length." });
+        out.push({ icon: "\u26A1", text: "At x=0 (equilibrium), all energy is KE (maximum speed). At x=\u00B1A (extremes), all energy is PE (momentarily stopped)." });
+        return out;
+      }, [T]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Spring Constant (k)" value={k} min={10} max={500} step={5} onChange={setK} unit="N/m" />
+              <Slider label="Mass (m)" value={m} min={0.5} max={10} step={0.5} onChange={setM} unit="kg" />
+              <Slider label="Amplitude (A)" value={A} min={0.05} max={0.5} step={0.01} onChange={setA} unit="m" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Mass-Spring SHM", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: "T = 2" + PI_SYM + SQRT + "(m/k) = " + round2(T) + " s" },
+              { text: "x(t) = A cos(" + OMEGA + "t)" },
+              { text: OMEGA + " = " + SQRT + "(k/m) = " + round2(omegaN) + " rad/s" },
+            ]} />
+          }
+          svg={
+            <Panel title="OSCILLATOR">
+              <svg viewBox="0 0 500 220" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                {/* Wall */}
+                <rect x={wallX} y={springY - 30} width={15} height={60} fill={C.border} rx={2} />
+                {/* Ground */}
+                <line x1={wallX} y1={springY + blockH / 2 + 2} x2={460} y2={springY + blockH / 2 + 2} stroke={C.border} strokeWidth={1} />
+                {/* Equilibrium line */}
+                <line x1={restX} y1={springY - 40} x2={restX} y2={springY + 50} stroke={C.border} strokeWidth={1} strokeDasharray="4 3" />
+                <text x={restX} y={springY - 44} fill={C.textDim} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">x=0</text>
+                {/* Spring */}
+                <path d={springPath} fill="none" stroke={C.spring} strokeWidth={2.5} />
+                {/* Block */}
+                <rect x={blockCx - blockW / 2} y={springY - blockH / 2} width={blockW} height={blockH} fill={C.panel} stroke={C.text} strokeWidth={1.5} rx={4} />
+                <text x={blockCx} y={springY + 4} fill={C.textDim} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="middle">{m}kg</text>
+                {/* Displacement label */}
+                {Math.abs(x) > 0.01 && React.createElement("g", null,
+                  React.createElement("line", { x1: restX, y1: springY + 55, x2: blockCx, y2: springY + 55, stroke: C.pos, strokeWidth: 1 }),
+                  React.createElement("text", { x: (restX + blockCx) / 2, y: springY + 68, fill: C.pos, fontSize: 9, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "x=" + round2(x) + "m")
+                )}
+                {/* Energy bars */}
+                {(function() {
+                  var maxE = Math.max(totalE, 0.01);
+                  var barH = 70;
+                  var peH = (PE / maxE) * barH;
+                  var keH = (KE / maxE) * barH;
+                  var bx = 410, by = springY + blockH / 2;
+                  return React.createElement("g", null,
+                    React.createElement("rect", { x: bx, y: by - peH, width: 18, height: Math.max(peH, 1), fill: C.pe, rx: 2 }),
+                    React.createElement("text", { x: bx + 9, y: by + 14, fill: C.pe, fontSize: 8, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "PE"),
+                    React.createElement("rect", { x: bx + 26, y: by - keH, width: 18, height: Math.max(keH, 1), fill: C.ke, rx: 2 }),
+                    React.createElement("text", { x: bx + 35, y: by + 14, fill: C.ke, fontSize: 8, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "KE")
+                  );
+                })()}
+              </svg>
+              <PlayControls isPlaying={anim.playing} onToggle={anim.toggle} onReset={anim.reset} playLabel="Oscillate" />
+            </Panel>
+          }
+          results={
+            <Panel title="LIVE READOUT">
+              <MetricRow label="Period (T)" value={round2(T)} unit="s" color={C.accent} />
+              <MetricRow label="Position (x)" value={round2(x)} unit="m" color={C.pos} />
+              <MetricRow label="Velocity (v)" value={round2(v)} unit="m/s" color={C.vel} />
+              <MetricRow label="KE" value={round2(KE)} unit="J" color={C.ke} />
+              <MetricRow label="PE" value={round2(PE)} unit="J" color={C.pe} />
+              <MetricRow label="Total E" value={round2(KE + PE)} unit="J" color={C.total} />
+              <MetricRow label="Time" value={round1(anim.simT)} unit="s" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 3: SHM GRAPHS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Graphs() {
+      var [A, setA] = useState(1);
+      var [T, setT] = useState(2);
+
+      var anim = useAnimLoop(1);
+      useEffect(function() { anim.reset(); }, [A, T]);
+
+      var omegaN = TWO_PI / T;
+      var periods = 3;
+      var tMax = T * periods;
+
+      var graphData = useMemo(function() {
+        var pts = [];
+        var n = 200;
+        for (var i = 0; i <= n; i++) {
+          var t = (i / n) * tMax;
+          pts.push({
+            t: round2(t),
+            x: round2(A * Math.cos(omegaN * t)),
+            v: round2(-A * omegaN * Math.sin(omegaN * t)),
+            a: round2(-A * omegaN * omegaN * Math.cos(omegaN * t)),
+          });
+        }
+        return pts;
+      }, [A, T, omegaN, tMax]);
+
+      // Current values
+      var curT = anim.simT % tMax;
+      var curX = A * Math.cos(omegaN * anim.simT);
+      var curV = -A * omegaN * Math.sin(omegaN * anim.simT);
+      var curA = -A * omegaN * omegaN * Math.cos(omegaN * anim.simT);
+
+      var hints = useMemo(function() {
+        return [
+          { icon: "\uD83D\uDCC8", text: "Position x(t) is a cosine wave. Velocity v(t) is its derivative \u2014 a negative sine, 90" + DEG + " ahead. Acceleration a(t) is the derivative of velocity \u2014 180" + DEG + " out of phase with position." },
+          { icon: "\uD83D\uDD11", text: "Key relationship: a = -" + OMEGA + "\u00B2x. Acceleration is always proportional to displacement and points toward equilibrium. This IS the definition of SHM." },
+          { icon: "\uD83C\uDFB5", text: "If this were sound, T = " + T + "s would be a frequency of " + round2(1 / T) + " Hz. Middle C is about 262 Hz!" },
+        ];
+      }, [T]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Amplitude (A)" value={A} min={0.1} max={3} step={0.1} onChange={setA} unit="m" />
+              <Slider label="Period (T)" value={T} min={0.5} max={5} step={0.1} onChange={setT} unit="s" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "SHM Equations", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: "x(t) = A cos(" + OMEGA + "t)", style: { color: C.pos } },
+              { text: "v(t) = -A" + OMEGA + " sin(" + OMEGA + "t)", style: { color: C.vel } },
+              { text: "a(t) = -A" + OMEGA + "\u00B2 cos(" + OMEGA + "t)", style: { color: C.accel } },
+              { text: OMEGA + " = 2" + PI_SYM + "/T = " + round2(omegaN) + " rad/s" },
+            ]} />
+          }
+          svg={
+            <>
+              <Panel title="POSITION x(t)">
+                <ResponsiveContainer width="100%" height={120}>
+                  <LineChart data={graphData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="t" type="number" domain={[0, tMax]} tick={{ fill: C.muted, fontSize: 9 }} />
+                    <YAxis domain={[-A * 1.2, A * 1.2]} tick={{ fill: C.muted, fontSize: 9 }} />
+                    <ReferenceLine y={0} stroke={C.border} />
+                    <Line dataKey="x" stroke={C.pos} strokeWidth={2} dot={false} isAnimationActive={false} />
+                    {anim.playing && <ReferenceLine x={round2(curT)} stroke={C.text} strokeDasharray="3 3" />}
+                  </LineChart>
+                </ResponsiveContainer>
+              </Panel>
+              <Panel title="VELOCITY v(t)">
+                <ResponsiveContainer width="100%" height={120}>
+                  <LineChart data={graphData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="t" type="number" domain={[0, tMax]} tick={{ fill: C.muted, fontSize: 9 }} />
+                    <YAxis tick={{ fill: C.muted, fontSize: 9 }} />
+                    <ReferenceLine y={0} stroke={C.border} />
+                    <Line dataKey="v" stroke={C.vel} strokeWidth={2} dot={false} isAnimationActive={false} />
+                    {anim.playing && <ReferenceLine x={round2(curT)} stroke={C.text} strokeDasharray="3 3" />}
+                  </LineChart>
+                </ResponsiveContainer>
+              </Panel>
+              <Panel title="ACCELERATION a(t)">
+                <ResponsiveContainer width="100%" height={120}>
+                  <LineChart data={graphData} margin={{ top: 5, right: 20, bottom: 5, left: 10 }}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="t" type="number" domain={[0, tMax]} tick={{ fill: C.muted, fontSize: 9 }} />
+                    <YAxis tick={{ fill: C.muted, fontSize: 9 }} />
+                    <ReferenceLine y={0} stroke={C.border} />
+                    <Line dataKey="a" stroke={C.accel} strokeWidth={2} dot={false} isAnimationActive={false} />
+                    {anim.playing && <ReferenceLine x={round2(curT)} stroke={C.text} strokeDasharray="3 3" />}
+                  </LineChart>
+                </ResponsiveContainer>
+                <PlayControls isPlaying={anim.playing} onToggle={anim.toggle} onReset={anim.reset} />
+              </Panel>
+            </>
+          }
+          results={
+            <Panel title="LIVE VALUES">
+              <MetricRow label="Time" value={round2(curT)} unit="s" />
+              <MetricRow label="x" value={round2(curX)} unit="m" color={C.pos} />
+              <MetricRow label="v" value={round2(curV)} unit="m/s" color={C.vel} />
+              <MetricRow label="a" value={round2(curA)} unit={"m/s\u00B2"} color={C.accel} />
+              <MetricRow label="Frequency" value={round2(1 / T)} unit="Hz" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 4: DAMPED OSCILLATIONS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Damped() {
+      var [A, setA] = useState(1);
+      var [T, setT] = useState(2);
+      var [damping, setDamping] = useState(0.3);
+
+      var anim = useAnimLoop(1);
+      useEffect(function() { anim.reset(); }, [A, T, damping]);
+
+      var omegaN = TWO_PI / T;
+      var tMax = T * 5;
+
+      // Damped: x(t) = A * e^(-bt) * cos(omega_d * t)
+      // omega_d = sqrt(omega_n^2 - b^2) for underdamped
+      var b = damping;
+      var omegaD = Math.sqrt(Math.max(omegaN * omegaN - b * b, 0.01));
+      var regime = b < omegaN ? "Underdamped" : b > omegaN * 1.05 ? "Overdamped" : "Critically Damped";
+
+      var graphData = useMemo(function() {
+        var pts = [];
+        var n = 300;
+        for (var i = 0; i <= n; i++) {
+          var t = (i / n) * tMax;
+          var env = A * Math.exp(-b * t);
+          var xVal;
+          if (b < omegaN) {
+            xVal = env * Math.cos(omegaD * t);
+          } else if (b > omegaN * 1.05) {
+            // Overdamped: sum of two exponentials
+            var r1 = -b + Math.sqrt(b * b - omegaN * omegaN);
+            var r2 = -b - Math.sqrt(b * b - omegaN * omegaN);
+            xVal = A * 0.5 * (Math.exp(r1 * t) + Math.exp(r2 * t));
+          } else {
+            // Critically damped
+            xVal = A * (1 + b * t) * Math.exp(-b * t);
+          }
+          pts.push({
+            t: round2(t),
+            x: round2(xVal),
+            env: round2(env),
+            negEnv: round2(-env),
+          });
+        }
+        return pts;
+      }, [A, T, b, omegaN, omegaD, tMax]);
+
+      var curT = anim.simT % tMax;
+      var curEnv = A * Math.exp(-b * anim.simT);
+      var curX = b < omegaN ? curEnv * Math.cos(omegaD * anim.simT) : curEnv;
+
+      var hints = useMemo(function() {
+        var out = [];
+        if (regime === "Underdamped") out.push({ icon: "\uD83C\uDF0A", text: "Underdamped: the system oscillates but each swing is smaller. The amplitude decays exponentially as e^(-bt). This is a swing slowing down." });
+        if (regime === "Critically Damped") out.push({ icon: "\uD83C\uDFAF", text: "Critically damped: returns to equilibrium as fast as possible WITHOUT oscillating. This is the ideal for car shock absorbers and door closers." });
+        if (regime === "Overdamped") out.push({ icon: "\uD83D\uDC22", text: "Overdamped: so much friction that it creeps back slowly without ever oscillating. Like pushing through honey." });
+        out.push({ icon: "\uD83D\uDD34", text: "The red dashed envelope shows e^(-bt) \u2014 it bounds the oscillation. Larger damping = faster decay." });
+        return out;
+      }, [regime]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Amplitude (A)" value={A} min={0.1} max={3} step={0.1} onChange={setA} unit="m" />
+              <Slider label="Natural Period (T)" value={T} min={0.5} max={5} step={0.1} onChange={setT} unit="s" />
+              <Slider label="Damping (b)" value={damping} min={0} max={8} step={0.1} onChange={setDamping} unit="1/s" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Damped Oscillation", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: "x(t) = Ae^(-bt) cos(" + OMEGA + "_d t)" },
+              { text: OMEGA + "_d = " + SQRT + "(" + OMEGA + "\u00B2 - b\u00B2) = " + round2(omegaD) + " rad/s" },
+              { text: "Regime: " + regime, style: { color: regime === "Underdamped" ? C.vel : regime === "Critically Damped" ? C.accent : C.warning } },
+            ]} />
+          }
+          svg={
+            <Panel title="DAMPED MOTION">
+              <ResponsiveContainer width="100%" height={250}>
+                <LineChart data={graphData} margin={{ top: 10, right: 20, bottom: 20, left: 10 }}>
+                  <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                  <XAxis dataKey="t" type="number" domain={[0, tMax]}
+                    tick={{ fill: C.muted, fontSize: 9, fontFamily: "'JetBrains Mono'" }}
+                    label={{ value: "Time (s)", position: "insideBottom", offset: -10, style: { fill: C.muted, fontSize: 10 } }} />
+                  <YAxis domain={[-A * 1.2, A * 1.2]} tick={{ fill: C.muted, fontSize: 9 }} />
+                  <ReferenceLine y={0} stroke={C.border} />
+                  <Line dataKey="env" stroke={C.damped} strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} name="Envelope" />
+                  <Line dataKey="negEnv" stroke={C.damped} strokeWidth={1} strokeDasharray="6 4" dot={false} isAnimationActive={false} name="-Envelope" />
+                  <Line dataKey="x" stroke={C.pos} strokeWidth={2} dot={false} isAnimationActive={false} name="x(t)" />
+                  {anim.playing && <ReferenceLine x={round2(curT)} stroke={C.text} strokeDasharray="3 3" />}
+                </LineChart>
+              </ResponsiveContainer>
+              <div style={{ display: "flex", gap: 16, justifyContent: "center", fontSize: 10 }}>
+                <span><span style={{ color: C.pos }}>{"\u2588"}</span> x(t)</span>
+                <span><span style={{ color: C.damped }}>- -</span> Envelope</span>
+              </div>
+              <PlayControls isPlaying={anim.playing} onToggle={anim.toggle} onReset={anim.reset} />
+            </Panel>
+          }
+          results={
+            <Panel title="LIVE READOUT">
+              <MetricRow label="Time" value={round2(curT)} unit="s" />
+              <MetricRow label="Position (x)" value={round2(curX)} unit="m" color={C.pos} />
+              <MetricRow label="Envelope" value={round2(curEnv)} unit="m" color={C.damped} />
+              <MetricRow label="Regime" value={regime} unit="" color={C.accent} />
+              <MetricRow label={"Damped " + OMEGA} value={round2(omegaD)} unit="rad/s" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 5: PENDULUM LAB
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Lab() {
+      var [L, setL] = useState(2);
+      var [theta0Deg, setTheta0Deg] = useState(30);
+      var [mass, setMass] = useState(1);
+      var [gravKey, setGravKey] = useState("Earth");
+      var [largeAngle, setLargeAngle] = useState(false);
+
+      var g = GRAVITY_PRESETS[gravKey].g;
+      var anim = useAnimLoop(1);
+      useEffect(function() { anim.reset(); }, [L, theta0Deg, mass, gravKey, largeAngle]);
+
+      var theta0 = degToRad(theta0Deg);
+      var omegaN = Math.sqrt(g / L);
+      var T_small = TWO_PI * Math.sqrt(L / g);
+
+      // Large angle correction (first-order): T ≈ T_small * (1 + θ₀²/16)
+      var T_large = T_small * (1 + (theta0 * theta0) / 16);
+      var T_display = largeAngle ? T_large : T_small;
+
+      // For animation: use numerical integration for large angle
+      var theta, omega;
+      if (!largeAngle) {
+        theta = theta0 * Math.cos(omegaN * anim.simT);
+        omega = -theta0 * omegaN * Math.sin(omegaN * anim.simT);
+      } else {
+        // Simple Euler integration (precomputed for current simT)
+        var dt = 0.005;
+        var steps = Math.min(Math.floor(anim.simT / dt), 200000);
+        var th = theta0, om = 0;
+        for (var i = 0; i < steps; i++) {
+          var alpha = -(g / L) * Math.sin(th);
+          om += alpha * dt;
+          th += om * dt;
+        }
+        theta = th;
+        omega = om;
+      }
+
+      var h = L * (1 - Math.cos(theta));
+      var PE = mass * g * h;
+      var KE = 0.5 * mass * (L * omega) * (L * omega);
+
+      // SVG
+      var pivotX = 250, pivotY = 40, armLen = 140;
+      var bobX = pivotX + armLen * Math.sin(theta);
+      var bobY = pivotY + armLen * Math.cos(theta);
+
+      var pctError = T_small > 0 ? round1(((T_large - T_small) / T_small) * 100) : 0;
+
+      var hints = useMemo(function() {
+        var out = [];
+        out.push({ icon: "\uD83C\uDF0E", text: "On " + gravKey + " (g=" + g + " m/s\u00B2), T = " + round2(T_small) + "s. Try Moon \u2014 the pendulum swings much slower!" });
+        if (largeAngle && theta0Deg >= 40) out.push({ icon: "\u26A0\uFE0F", text: "Small-angle formula predicts T=" + round2(T_small) + "s, but actual period is closer to " + round2(T_large) + "s (" + pctError + "% error). The approximation sin" + THETA + " \u2248 " + THETA + " fails at large angles." });
+        if (!largeAngle) out.push({ icon: "\uD83D\uDCCF", text: "Small-angle mode: sin" + THETA + " \u2248 " + THETA + ". This is accurate within 1% for angles under ~15" + DEG + "." });
+        out.push({ icon: "\u2696\uFE0F", text: "Change the mass \u2014 the period stays the same! Heavier bobs swing at exactly the same rate (Galileo discovered this)." });
+        return out;
+      }, [gravKey, g, T_small, T_large, theta0Deg, largeAngle, pctError]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Length (L)" value={L} min={0.5} max={5} step={0.1} onChange={setL} unit="m" />
+              <Slider label={"Initial Angle (" + THETA + "\u2080)"} value={theta0Deg} min={5} max={80} step={1} onChange={setTheta0Deg} unit={DEG} />
+              <Slider label="Mass (m)" value={mass} min={0.1} max={10} step={0.1} onChange={setMass} unit="kg" />
+              <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 10, color: C.accent, marginBottom: 6, marginTop: 8 }}>GRAVITY</div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 10 }}>
+                {Object.keys(GRAVITY_PRESETS).map(function(key) {
+                  return <button key={key} onClick={function() { setGravKey(key); }}
+                    style={{ background: gravKey === key ? C.accent : "transparent", color: gravKey === key ? C.bg : C.textDim, border: "1px solid " + (gravKey === key ? C.accent : C.border), borderRadius: 4, padding: "3px 8px", fontSize: 10, fontFamily: "'JetBrains Mono'", cursor: "pointer" }}>
+                    {key}
+                  </button>;
+                })}
+              </div>
+              <div style={{ color: C.muted, fontSize: 10, marginBottom: 8 }}>g = {g} m/s{"\u00B2"}</div>
+              <button onClick={function() { setLargeAngle(!largeAngle); }}
+                style={{ background: largeAngle ? C.warning : C.border, color: largeAngle ? "#000" : C.muted, border: "none", borderRadius: 12, padding: "3px 12px", fontSize: 10, fontFamily: "'JetBrains Mono'", cursor: "pointer", fontWeight: 700 }}>
+                {largeAngle ? "Large Angle ON" : "Large Angle OFF"}
+              </button>
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Pendulum Lab", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: "T (small angle) = 2" + PI_SYM + SQRT + "(L/g) = " + round2(T_small) + " s" },
+              largeAngle ? { text: "T (corrected) \u2248 " + round2(T_large) + " s (" + pctError + "% longer)", style: { color: C.warning } } : { text: "Using small-angle approximation" },
+              { text: "g = " + g + " m/s\u00B2 (" + gravKey + ")" },
+            ]} />
+          }
+          svg={
+            <Panel title="PENDULUM">
+              <svg viewBox="0 0 500 280" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                <line x1={200} y1={pivotY} x2={300} y2={pivotY} stroke={C.border} strokeWidth={2} />
+                <circle cx={pivotX} cy={pivotY} r={4} fill={C.textDim} />
+                <line x1={pivotX} y1={pivotY} x2={pivotX} y2={pivotY + armLen + 20} stroke={C.border} strokeWidth={1} strokeDasharray="4 3" />
+                <line x1={pivotX} y1={pivotY} x2={bobX} y2={bobY} stroke={C.string} strokeWidth={2} />
+                <circle cx={bobX} cy={bobY} r={14} fill={C.bob} opacity={0.9} />
+                <text x={bobX} y={bobY + 4} fill="#fff" fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">{mass}kg</text>
+                {/* Angle arc */}
+                {Math.abs(theta) > 0.02 && React.createElement("path", {
+                  d: "M " + pivotX + "," + (pivotY + 30) + " A 30 30 0 0 " + (theta > 0 ? "1" : "0") + " " + (pivotX + 30 * Math.sin(theta)) + "," + (pivotY + 30 * Math.cos(theta)),
+                  fill: "none", stroke: C.pos, strokeWidth: 1.5
+                })}
+                <text x={pivotX + 45} y={pivotY + 25} fill={C.pos} fontSize={10} fontFamily="'JetBrains Mono'">{round1(radToDeg(theta))}{DEG}</text>
+                {/* Energy bars */}
+                {(function() {
+                  var totalE = mass * g * L * (1 - Math.cos(theta0));
+                  var maxE = Math.max(totalE, 0.01);
+                  var barHt = 100;
+                  var peH = (PE / maxE) * barHt;
+                  var keH = (KE / maxE) * barHt;
+                  var bx = 420, by = 220;
+                  return React.createElement("g", null,
+                    React.createElement("rect", { x: bx, y: by - peH, width: 20, height: Math.max(peH, 1), fill: C.pe, rx: 2 }),
+                    React.createElement("text", { x: bx + 10, y: by + 14, fill: C.pe, fontSize: 8, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "PE"),
+                    React.createElement("rect", { x: bx + 30, y: by - keH, width: 20, height: Math.max(keH, 1), fill: C.ke, rx: 2 }),
+                    React.createElement("text", { x: bx + 40, y: by + 14, fill: C.ke, fontSize: 8, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, "KE")
+                  );
+                })()}
+                {/* Gravity label */}
+                <text x={30} y={270} fill={C.textDim} fontSize={10} fontFamily="'JetBrains Mono'">{gravKey}: g={g}m/s{"\u00B2"}</text>
+                {largeAngle && <text x={30} y={255} fill={C.warning} fontSize={10} fontFamily="'Orbitron'">LARGE ANGLE MODE</text>}
+              </svg>
+              <PlayControls isPlaying={anim.playing} onToggle={anim.toggle} onReset={anim.reset} playLabel="Swing" />
+            </Panel>
+          }
+          results={
+            <Panel title="LIVE READOUT">
+              <MetricRow label="T (small angle)" value={round2(T_small)} unit="s" color={C.accent} />
+              {largeAngle && <MetricRow label="T (corrected)" value={round2(T_large)} unit="s" color={C.warning} />}
+              <MetricRow label={"Angle (" + THETA + ")"} value={round1(radToDeg(theta))} unit={DEG} color={C.pos} />
+              <MetricRow label="Angular vel" value={round2(omega)} unit="rad/s" color={C.vel} />
+              <MetricRow label="KE" value={round2(KE)} unit="J" color={C.ke} />
+              <MetricRow label="PE" value={round2(PE)} unit="J" color={C.pe} />
+              <MetricRow label="Total E" value={round2(KE + PE)} unit="J" color={C.total} />
+              <MetricRow label="Time" value={round1(anim.simT)} unit="s" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MAIN COMPONENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function PendulumSimulator() {
+      var [activeTab, setActiveTab] = useState("pendulum");
+
+      var tabMap = {
+        pendulum: Tab_Pendulum,
+        massspring: Tab_MassSpring,
+        graphs: Tab_Graphs,
+        damped: Tab_Damped,
+        lab: Tab_Lab,
+      };
+
+      var ActiveComponent = tabMap[activeTab];
+
+      return (
+        <div style={{ background: C.bg, color: C.text, minHeight: "100vh", padding: "20px 24px", fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ textAlign: "center", marginBottom: 16 }}>
+            <h1 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 20, fontWeight: 700, color: C.accent, letterSpacing: 2, marginBottom: 4 }}>
+              PENDULUMS &amp; SIMPLE HARMONIC MOTION
+            </h1>
+            <p style={{ color: C.muted, fontSize: 12 }}>Oscillations, waves, and the physics of back-and-forth</p>
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 16, justifyContent: "center" }}>
+            {TABS.map(function(tab) {
+              return <button key={tab.id} onClick={function() { setActiveTab(tab.id); }}
+                style={{
+                  background: activeTab === tab.id ? C.accent : "transparent",
+                  color: activeTab === tab.id ? C.bg : C.textDim,
+                  border: "1px solid " + (activeTab === tab.id ? C.accent : C.border),
+                  borderRadius: 6, padding: "6px 14px", fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
+                  fontWeight: activeTab === tab.id ? 700 : 400, transition: "all 0.15s",
+                }}>
+                {tab.label}
+              </button>;
+            })}
+          </div>
+
+          <ActiveComponent />
+        </div>
+      );
+    }
+
+    var root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(React.createElement(PendulumSimulator));
+  </script>
+</body>
+</html>

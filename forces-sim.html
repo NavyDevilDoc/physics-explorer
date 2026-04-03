@@ -1,0 +1,984 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Newton's Second Law &amp; Forces Simulator</title>
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <!-- React 18 -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.15.3/umd/Recharts.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #070c18; overflow-x: hidden; }
+    input[type="range"] {
+      -webkit-appearance: none; appearance: none; outline: none;
+      height: 4px; border-radius: 2px;
+    }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #00d4ff; cursor: pointer; border: 2px solid #070c18;
+    }
+    input[type="range"]:disabled::-webkit-slider-thumb { background: #475569; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div style="background:#070c18;padding:8px 24px;font-family:'JetBrains Mono',monospace;">
+    <a href="index.html" style="color:#475569;font-size:11px;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00d4ff'" onmouseout="this.style.color='#475569'">&larr; Physics Explorer</a>
+  </div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useCallback } = React;
+    const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } = Recharts;
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONSTANTS
+    // ═══════════════════════════════════════════════════════════════
+
+    const G = 9.81;
+    // Greek letters and symbols as JS constants for reuse
+    const THETA = "\u03B8";   // θ
+    const DEG   = "\u00B0";   // °
+    const MU    = "\u03BC";   // μ
+    const SUM   = "\u03A3";   // Σ
+    const SUB1  = "\u2081";   // ₁
+    const SUB2  = "\u2082";   // ₂
+    const CDOT  = "\u00B7";   // ·
+    const SQRT  = "\u221A";   // √
+    const DELTA = "\u0394";   // Δ
+    const PERP  = "\u22A5";   // ⊥
+    const PAR   = "\u2225";   // ∥
+    const MINUS = "\u2212";   // −
+    const GEQ   = "\u2265";   // ≥
+    const HALF  = "\u00BD";   // ½
+
+    const COLORS = {
+      bg: "#070c18", panel: "#0a1220", border: "#1a2d4a",
+      accent: "#00d4ff", muted: "#475569", text: "#e2e8f0", textDim: "#94a3b8",
+      warning: "#eab308",
+      fApplied: "#ff6b35", fWeight: "#ef4444", fNormal: "#22c55e",
+      fFriction: "#eab308", fTension: "#a855f7", fNet: "#00d4ff",
+    };
+
+    const TABS = [
+      { id: "forces1d", label: "Forces 1D" },
+      { id: "incline",  label: "Inclined Plane" },
+      { id: "friction", label: "Friction" },
+      { id: "boxramp",  label: "Box Up Ramp" },
+      { id: "atwood",   label: "Atwood Machine" },
+      { id: "hanging",  label: "Hanging Signs" },
+      { id: "work",     label: "Work & Energy" },
+    ];
+
+    function round2(n) { return Math.round(n * 100) / 100; }
+    function degToRad(d) { return d * Math.PI / 180; }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SHARED UI COMPONENTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Panel({ title, children, borderColor, style }) {
+      return (
+        <div style={{ background: COLORS.panel, border: `1px solid ${borderColor || COLORS.border}`, borderRadius: 8, padding: 14, ...style }}>
+          {title && <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: COLORS.accent, marginBottom: 10, letterSpacing: 1 }}>{title}</div>}
+          {children}
+        </div>
+      );
+    }
+
+    function Slider({ label, value, min, max, step, onChange, unit, disabled, tooltip }) {
+      const pct = ((value - min) / (max - min)) * 100;
+      return (
+        <div style={{ marginBottom: 12, opacity: disabled ? 0.4 : 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+            <span style={{ color: COLORS.textDim }}>
+              {label}
+              {tooltip && disabled && <span style={{ color: COLORS.warning, marginLeft: 6, fontSize: 10, fontStyle: "italic" }}>{tooltip}</span>}
+            </span>
+            <span style={{ color: COLORS.accent }}>
+              {value}{unit && <span style={{ color: COLORS.muted, marginLeft: 2 }}>{unit}</span>}
+            </span>
+          </div>
+          <input type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+            onChange={(e) => onChange(parseFloat(e.target.value))}
+            style={{ width: "100%", accentColor: COLORS.accent,
+              background: `linear-gradient(to right, ${COLORS.accent} 0%, ${COLORS.accent} ${pct}%, ${COLORS.border} ${pct}%, ${COLORS.border} 100%)`,
+              height: 4, borderRadius: 2, cursor: disabled ? "not-allowed" : "pointer" }} />
+        </div>
+      );
+    }
+
+    function MetricRow({ label, value, unit, color }) {
+      return (
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ color: COLORS.muted }}>{label}</span>
+          <span>
+            <span style={{ color: color || COLORS.text, fontWeight: 500 }}>{value}</span>
+            <span style={{ color: COLORS.muted, marginLeft: 4, fontSize: 10 }}>{unit}</span>
+          </span>
+        </div>
+      );
+    }
+
+    function HintBox({ hints }) {
+      if (!hints || hints.length === 0) return null;
+      return (
+        <Panel title="INSIGHTS">
+          {hints.map((h, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 11, color: COLORS.textDim, lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>{h.icon}</span><span>{h.text}</span>
+            </div>
+          ))}
+        </Panel>
+      );
+    }
+
+    function EquationBlock({ lines }) {
+      return (
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: COLORS.textDim, lineHeight: 1.8, padding: "8px 12px", background: "rgba(0,0,0,0.3)", borderRadius: 6, border: `1px solid ${COLORS.border}` }}>
+          {lines.map((l, i) => <div key={i} style={l.style || {}}>{l.text}</div>)}
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SVG FORCE ARROW (simplified labels — short name only, no value)
+    // ═══════════════════════════════════════════════════════════════
+
+    function ForceArrow({ x, y, angle, length, color, label, dashed, labelOffset, strokeWidth }) {
+      if (Math.abs(length) < 1) return null;
+      const rad = degToRad(angle);
+      const dx = Math.cos(rad) * length;
+      const dy = -Math.sin(rad) * length;
+      const ex = x + dx, ey = y + dy;
+      const headLen = 8, headW = 5;
+      const ax = Math.cos(rad), ay = -Math.sin(rad);
+      const px = -ay, py = ax;
+      const tip1x = ex - ax * headLen + px * headW;
+      const tip1y = ey - ay * headLen + py * headW;
+      const tip2x = ex - ax * headLen - px * headW;
+      const tip2y = ey - ay * headLen - py * headW;
+      const off = labelOffset || 14;
+      const lx = (x + ex) / 2 + px * off;
+      const ly = (y + ey) / 2 + py * off;
+
+      return (
+        <g>
+          <line x1={x} y1={y} x2={ex} y2={ey} stroke={color} strokeWidth={strokeWidth || 2.5}
+            strokeDasharray={dashed ? "6 4" : undefined} />
+          <polygon points={`${ex},${ey} ${tip1x},${tip1y} ${tip2x},${tip2y}`} fill={color} />
+          {label && <text x={lx} y={ly} fill={color} fontSize={10} fontFamily="'JetBrains Mono', monospace"
+            textAnchor="middle" dominantBaseline="middle">{label}</text>}
+        </g>
+      );
+    }
+
+    function forceToLen(force, maxForce, maxPx) {
+      if (maxForce === 0) return 0;
+      const len = (Math.abs(force) / maxForce) * (maxPx || 100);
+      return Math.max(len, Math.abs(force) > 0.01 ? 18 : 0);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB LAYOUT WRAPPER
+    // ═══════════════════════════════════════════════════════════════
+
+    function TabLayout({ sliders, svg, results, equations, hints }) {
+      return (
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+            {sliders}
+            {equations}
+          </div>
+          <div style={{ flex: 1, minWidth: 380, display: "flex", flexDirection: "column", gap: 12 }}>
+            {svg}
+            {results}
+            {hints}
+          </div>
+        </div>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 1: FORCES IN 1D
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Forces1D() {
+      const [F, setF] = useState(20);
+      const [m, setM] = useState(5);
+      const [F2, setF2] = useState(0);
+      const [showF2, setShowF2] = useState(false);
+
+      const physics = useMemo(() => {
+        const W = m * G;
+        const N = W;
+        const Fnet = F - (showF2 ? F2 : 0);
+        const a = Fnet / m;
+        return { W: round2(W), N: round2(N), Fnet: round2(Fnet), a: round2(a) };
+      }, [F, m, F2, showF2]);
+
+      const maxF = Math.max(Math.abs(F), showF2 ? Math.abs(F2) : 0, m * G, 1);
+      const cx = 300, cy = 130, bw = 70, bh = 50;
+
+      const hints = useMemo(() => {
+        const h = [];
+        if (physics.Fnet === 0) h.push({ icon: "\u2696\uFE0F", text: "Net force is zero \u2014 the object is in equilibrium. It stays at rest or moves at constant velocity (Newton's First Law)." });
+        if (m >= 40) h.push({ icon: "\uD83D\uDCAA", text: "Large mass resists changes in motion. This resistance is inertia \u2014 the 'm' in F = ma." });
+        if (Math.abs(physics.a) > 15) h.push({ icon: "\uD83D\uDE80", text: "That's a large acceleration! For reference, a roller coaster peaks around 3\u20134g." });
+        return h;
+      }, [physics, m]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Applied Force (F)" value={F} min={-100} max={100} step={1} onChange={setF} unit="N" />
+              <Slider label="Mass (m)" value={m} min={0.5} max={50} step={0.5} onChange={setM} unit="kg" />
+              <div style={{ marginTop: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                <button onClick={() => setShowF2(!showF2)}
+                  style={{ background: showF2 ? COLORS.fFriction : COLORS.border, color: showF2 ? "#fff" : COLORS.muted, border: "none", borderRadius: 12, padding: "3px 12px", fontSize: 10, fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", fontWeight: 700 }}>
+                  {showF2 ? "2nd Force ON" : "2nd Force OFF"}
+                </button>
+              </div>
+              {showF2 && <Slider label="Opposing Force" value={F2} min={0} max={100} step={1} onChange={setF2} unit="N" />}
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Newton's Second Law", style: { color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `F_net = ${showF2 ? `F ${MINUS} F${SUB2} = ` : ""}${physics.Fnet} N` },
+              { text: `a = F_net / m = ${physics.a} m/s${DEG === "\u00B0" ? "\u00B2" : "2"}` },
+              { text: `W = mg = ${physics.W} N` },
+              { text: `N = ${physics.N} N` },
+            ]} />
+          }
+          svg={
+            <Panel title="FREE BODY DIAGRAM">
+              <svg viewBox="0 0 600 260" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                <line x1={50} y1={cy + bh / 2} x2={550} y2={cy + bh / 2} stroke={COLORS.border} strokeWidth={2} />
+                <rect x={cx - bw / 2} y={cy - bh / 2} width={bw} height={bh} fill={COLORS.panel} stroke={COLORS.text} strokeWidth={1.5} rx={4} />
+                <text x={cx} y={cy + 4} fill={COLORS.textDim} fontSize={12} fontFamily="'JetBrains Mono'" textAnchor="middle">{m} kg</text>
+                {/* Weight */}
+                <ForceArrow x={cx} y={cy + bh / 2} angle={-90} length={forceToLen(physics.W, maxF, 80)} color={COLORS.fWeight} label="W" labelOffset={-16} />
+                {/* Normal */}
+                <ForceArrow x={cx} y={cy - bh / 2} angle={90} length={forceToLen(physics.N, maxF, 80)} color={COLORS.fNormal} label="N" labelOffset={-16} />
+                {/* Applied force */}
+                {Math.abs(F) > 0 && <ForceArrow x={F >= 0 ? cx + bw / 2 : cx - bw / 2} y={cy} angle={F >= 0 ? 0 : 180} length={forceToLen(F, maxF, 100)} color={COLORS.fApplied} label="F" />}
+                {/* Opposing force */}
+                {showF2 && F2 > 0 && <ForceArrow x={cx - bw / 2} y={cy} angle={180} length={forceToLen(F2, maxF, 100)} color={COLORS.fFriction} label={`F${SUB2}`} />}
+                {/* Net force */}
+                {Math.abs(physics.Fnet) > 0.01 && (
+                  <ForceArrow x={physics.Fnet >= 0 ? cx + bw / 2 + 5 : cx - bw / 2 - 5} y={cy - bh / 2 - 15} angle={physics.Fnet >= 0 ? 0 : 180} length={forceToLen(physics.Fnet, maxF, 100)} color={COLORS.fNet} label="F_net" dashed />
+                )}
+                {physics.Fnet === 0 && <text x={cx} y={30} fill={COLORS.accent} fontSize={13} fontFamily="'Orbitron'" textAnchor="middle">EQUILIBRIUM</text>}
+              </svg>
+            </Panel>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="Net Force (F_net)" value={physics.Fnet} unit="N" color={COLORS.fNet} />
+              <MetricRow label="Acceleration (a)" value={physics.a} unit={`m/s\u00B2`} color={COLORS.accent} />
+              <MetricRow label="Weight (W)" value={physics.W} unit="N" color={COLORS.fWeight} />
+              <MetricRow label="Normal Force (N)" value={physics.N} unit="N" color={COLORS.fNormal} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 2: INCLINED PLANE
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_InclinedPlane() {
+      const [theta, setTheta] = useState(30);
+      const [m, setM] = useState(5);
+
+      const physics = useMemo(() => {
+        const rad = degToRad(theta);
+        const W = m * G;
+        const Wpar = W * Math.sin(rad);
+        const Wperp = W * Math.cos(rad);
+        const N = Wperp;
+        const a = G * Math.sin(rad);
+        return { W: round2(W), Wpar: round2(Wpar), Wperp: round2(Wperp), N: round2(N), a: round2(a) };
+      }, [theta, m]);
+
+      const hints = useMemo(() => {
+        const h = [];
+        if (theta === 0) h.push({ icon: "\uD83D\uDCCF", text: `At 0${DEG}, the entire weight pushes into the surface. No component drives the block along the ramp \u2014 sin(0) = 0.` });
+        if (theta >= 85) h.push({ icon: "\uD83D\uDCA8", text: `Nearly vertical! This approaches free fall \u2014 sin(90${DEG}) = 1, so the full weight acts along the ramp.` });
+        if (theta === 45) h.push({ icon: "\uD83D\uDCD0", text: `At 45${DEG}, sin(${THETA}) = cos(${THETA}), so the parallel and perpendicular components are equal.` });
+        h.push({ icon: "\uD83D\uDD0D", text: `Notice: the acceleration g${CDOT}sin(${THETA}) doesn't depend on mass! All objects slide at the same rate on a frictionless ramp (like Galileo demonstrated).` });
+        return h;
+      }, [theta]);
+
+      // SVG ramp geometry
+      const rampW = 400, rampH = rampW * Math.tan(degToRad(Math.min(theta, 75)));
+      const clampH = Math.min(rampH, 220);
+      const scale = clampH / Math.max(rampH, 1);
+      const rW = rampW * scale;
+      const rH = clampH;
+      const ox = 100, oy = 240;
+      const rad = degToRad(theta);
+      const frac = 0.4;
+      const px = ox + (1 - frac) * rW;
+      const py = oy - frac * rH;
+      const maxF = Math.max(physics.W, 1);
+      const arrowScale = 90;
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label={`Incline Angle (${THETA})`} value={theta} min={0} max={60} step={1} onChange={setTheta} unit={DEG} />
+              <Slider label="Mass (m)" value={m} min={0.5} max={50} step={0.5} onChange={setM} unit="kg" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Vector Decomposition", style: { color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `W = mg = ${physics.W} N` },
+              { text: `W${PAR} = mg${CDOT}sin(${THETA}) = ${physics.Wpar} N`, style: { color: COLORS.fApplied } },
+              { text: `W${PERP} = mg${CDOT}cos(${THETA}) = ${physics.Wperp} N`, style: { color: COLORS.fNormal } },
+              { text: `N = mg${CDOT}cos(${THETA}) = ${physics.N} N` },
+              { text: `a = g${CDOT}sin(${THETA}) = ${physics.a} m/s\u00B2`, style: { color: COLORS.fNet } },
+            ]} />
+          }
+          svg={
+            <Panel title="FORCE DIAGRAM">
+              <svg viewBox="0 0 600 280" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                {/* Ramp */}
+                <polygon points={`${ox},${oy} ${ox + rW},${oy} ${ox},${oy - rH}`} fill="none" stroke={COLORS.border} strokeWidth={2} />
+                <line x1={30} y1={oy} x2={570} y2={oy} stroke={COLORS.border} strokeWidth={1} />
+                {/* Angle arc */}
+                <path d={`M ${ox + 40},${oy} A 40 40 0 0 0 ${ox + 40 * Math.cos(rad)},${oy - 40 * Math.sin(rad)}`} fill="none" stroke={COLORS.textDim} strokeWidth={1} />
+                <text x={ox + 50} y={oy - 8} fill={COLORS.textDim} fontSize={11} fontFamily="'JetBrains Mono'">{theta}{DEG}</text>
+                {/* Block — bottom edge on ramp surface at (px,py), rotated to match ramp angle */}
+                <g transform={`translate(${px},${py}) rotate(${-theta})`}>
+                  <rect x={-25} y={-24} width={50} height={24} fill={COLORS.panel} stroke={COLORS.text} strokeWidth={1.5} rx={3} />
+                  <text x={0} y={-9} fill={COLORS.textDim} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="middle">{m}kg</text>
+                </g>
+                {/* Weight straight down from ramp contact point */}
+                <ForceArrow x={px} y={py} angle={-90} length={forceToLen(physics.W, maxF, arrowScale)} color={COLORS.fWeight} label="mg" labelOffset={20} />
+                {/* Parallel component (down ramp) */}
+                {theta > 0 && <ForceArrow x={px} y={py} angle={180 + theta} length={forceToLen(physics.Wpar, maxF, arrowScale)} color={COLORS.fApplied} label={`mg sin${THETA}`} labelOffset={16} />}
+                {/* Perpendicular component (into surface) */}
+                {theta > 0 && <ForceArrow x={px} y={py} angle={-(90 - theta)} length={forceToLen(physics.Wperp, maxF, arrowScale)} color={COLORS.fNormal} label={`mg cos${THETA}`} dashed labelOffset={-18} />}
+                {/* Normal force away from ramp */}
+                <ForceArrow x={px} y={py} angle={90 + theta} length={forceToLen(physics.N, maxF, arrowScale)} color={COLORS.fNormal} label="N" labelOffset={18} />
+              </svg>
+            </Panel>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="Weight (mg)" value={physics.W} unit="N" color={COLORS.fWeight} />
+              <MetricRow label={`Parallel (mg sin${THETA})`} value={physics.Wpar} unit="N" color={COLORS.fApplied} />
+              <MetricRow label={`Perpendicular (mg cos${THETA})`} value={physics.Wperp} unit="N" color={COLORS.fNormal} />
+              <MetricRow label="Normal Force (N)" value={physics.N} unit="N" color={COLORS.fNormal} />
+              <MetricRow label="Acceleration (a)" value={physics.a} unit={`m/s\u00B2`} color={COLORS.fNet} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 3: FRICTION
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Friction() {
+      const [F, setF] = useState(20);
+      const [m, setM] = useState(10);
+      const [muS, setMuS] = useState(0.5);
+      const [muK, setMuK] = useState(0.3);
+
+      const handleMuS = useCallback((v) => { setMuS(v); if (muK > v) setMuK(round2(v)); }, [muK]);
+      const handleMuK = useCallback((v) => { setMuK(Math.min(v, muS)); }, [muS]);
+
+      const physics = useMemo(() => {
+        const W = m * G;
+        const N = W;
+        const fsMax = muS * N;
+        const fk = muK * N;
+        const isSliding = F > fsMax;
+        const friction = isSliding ? fk : Math.min(F, fsMax);
+        const Fnet = isSliding ? F - fk : 0;
+        const a = isSliding ? Fnet / m : 0;
+        return { W: round2(W), N: round2(N), fsMax: round2(fsMax), fk: round2(fk), isSliding, friction: round2(friction), Fnet: round2(Fnet), a: round2(a) };
+      }, [F, m, muS, muK]);
+
+      const maxF = Math.max(F, physics.fsMax, physics.W, 1);
+      const cx = 300, cy = 130, bw = 70, bh = 50;
+
+      const hints = useMemo(() => {
+        const h = [];
+        if (!physics.isSliding && F > 0 && F >= physics.fsMax * 0.8) h.push({ icon: "\u26A0\uFE0F", text: "Almost at the tipping point! Static friction is near its maximum. A little more force and the block will start sliding." });
+        if (physics.isSliding) h.push({ icon: "\uD83D\uDCA8", text: `Once sliding begins, friction drops from ${physics.fsMax} N (static max) to ${physics.fk} N (kinetic). This is why it's harder to START pushing a heavy box than to KEEP it moving.` });
+        h.push({ icon: "\uD83E\uDDEA", text: `${MU}s (${muS}) ${GEQ} ${MU}k (${muK}) always. Stationary surfaces form stronger microscopic bonds than sliding ones.` });
+        return h;
+      }, [physics, F, muS, muK]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Applied Force (F)" value={F} min={0} max={150} step={1} onChange={setF} unit="N" />
+              <Slider label="Mass (m)" value={m} min={0.5} max={50} step={0.5} onChange={setM} unit="kg" />
+              <Slider label={`${MU}s (static)`} value={muS} min={0.1} max={1.0} step={0.01} onChange={handleMuS} unit="" />
+              <Slider label={`${MU}k (kinetic)`} value={muK} min={0.05} max={0.9} step={0.01} onChange={handleMuK} unit="" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Friction Model", style: { color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `fs,max = ${MU}s ${CDOT} N = ${physics.fsMax} N` },
+              { text: `fk = ${MU}k ${CDOT} N = ${physics.fk} N` },
+              { text: `Status: ${physics.isSliding ? "SLIDING" : "STATIC"}`, style: { color: physics.isSliding ? COLORS.fApplied : COLORS.fNormal } },
+              { text: `F_net = ${physics.Fnet} N` },
+              { text: `a = ${physics.a} m/s\u00B2` },
+            ]} />
+          }
+          svg={
+            <Panel title="FREE BODY DIAGRAM">
+              <svg viewBox="0 0 600 260" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                {/* Rough surface */}
+                {Array.from({ length: 20 }, (_, i) => (
+                  <line key={i} x1={80 + i * 24} y1={cy + bh / 2} x2={72 + i * 24} y2={cy + bh / 2 + 8} stroke={COLORS.border} strokeWidth={1} />
+                ))}
+                <line x1={50} y1={cy + bh / 2} x2={550} y2={cy + bh / 2} stroke={COLORS.border} strokeWidth={2} />
+                {/* Block */}
+                <rect x={cx - bw / 2} y={cy - bh / 2} width={bw} height={bh} fill={COLORS.panel}
+                  stroke={physics.isSliding ? COLORS.fApplied : COLORS.text} strokeWidth={physics.isSliding ? 2.5 : 1.5} rx={4}
+                  strokeDasharray={physics.isSliding ? undefined : "4 3"} />
+                <text x={cx} y={cy + 4} fill={COLORS.textDim} fontSize={11} fontFamily="'JetBrains Mono'" textAnchor="middle">{m}kg</text>
+                {/* Status */}
+                <text x={cx} y={30} fill={physics.isSliding ? COLORS.fApplied : COLORS.fNormal} fontSize={14} fontFamily="'Orbitron'" textAnchor="middle" fontWeight="bold">
+                  {physics.isSliding ? "SLIDING" : "STATIC"}
+                </text>
+                {/* Weight & Normal — offset to avoid overlap */}
+                <ForceArrow x={cx - 15} y={cy + bh / 2} angle={-90} length={forceToLen(physics.W, maxF, 80)} color={COLORS.fWeight} label="W" labelOffset={-16} />
+                <ForceArrow x={cx + 15} y={cy - bh / 2} angle={90} length={forceToLen(physics.N, maxF, 80)} color={COLORS.fNormal} label="N" labelOffset={16} />
+                {/* Applied force */}
+                {F > 0 && <ForceArrow x={cx + bw / 2} y={cy} angle={0} length={forceToLen(F, maxF, 100)} color={COLORS.fApplied} label="F" />}
+                {/* Friction */}
+                {physics.friction > 0 && <ForceArrow x={cx - bw / 2} y={cy} angle={180} length={forceToLen(physics.friction, maxF, 100)} color={COLORS.fFriction} label="f" />}
+                {/* Threshold marker */}
+                <line x1={cx + bw / 2 + forceToLen(physics.fsMax, maxF, 100)} y1={cy - 25} x2={cx + bw / 2 + forceToLen(physics.fsMax, maxF, 100)} y2={cy + 25}
+                  stroke={COLORS.fNormal} strokeWidth={1} strokeDasharray="4 3" opacity={0.6} />
+                <text x={cx + bw / 2 + forceToLen(physics.fsMax, maxF, 100)} y={cy - 30} fill={COLORS.fNormal} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="middle">fs,max</text>
+              </svg>
+            </Panel>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="Max Static Friction (fs,max)" value={physics.fsMax} unit="N" color={COLORS.fFriction} />
+              <MetricRow label="Kinetic Friction (fk)" value={physics.fk} unit="N" color={COLORS.fFriction} />
+              <MetricRow label="Actual Friction" value={physics.friction} unit="N" color={COLORS.fFriction} />
+              <MetricRow label="Net Force" value={physics.Fnet} unit="N" color={COLORS.fNet} />
+              <MetricRow label="Acceleration" value={physics.a} unit={`m/s\u00B2`} color={COLORS.fNet} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 4: BOX UP A RAMP
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_BoxRamp() {
+      const [Fapp, setFapp] = useState(50);
+      const [theta, setTheta] = useState(30);
+      const [m, setM] = useState(10);
+      const [muK, setMuK] = useState(0.2);
+
+      const physics = useMemo(() => {
+        const rad = degToRad(theta);
+        const W = m * G;
+        const Wpar = W * Math.sin(rad);
+        const Wperp = W * Math.cos(rad);
+        const N = Wperp;
+        const fk = muK * N;
+        const Fnet = Fapp - Wpar - fk;
+        const a = Fnet / m;
+        let regime = "accelerating up";
+        if (Math.abs(a) < 0.01) regime = "equilibrium";
+        else if (a < 0) regime = "slides back down";
+        return { W: round2(W), Wpar: round2(Wpar), Wperp: round2(Wperp), N: round2(N), fk: round2(fk), Fnet: round2(Fnet), a: round2(a), regime };
+      }, [Fapp, theta, m, muK]);
+
+      const hints = useMemo(() => {
+        const h = [];
+        if (physics.regime === "equilibrium") h.push({ icon: "\u2696\uFE0F", text: "Dynamic equilibrium! The applied force exactly balances gravity and friction along the ramp." });
+        if (physics.regime === "slides back down") h.push({ icon: "\u2B07\uFE0F", text: "Not enough force \u2014 gravity and friction win. The box would slide back down the ramp." });
+        if (muK === 0) h.push({ icon: "\u2728", text: "Zero friction! You only fight gravity. Compare this to the Inclined Plane tab." });
+        return h;
+      }, [physics, muK]);
+
+      const rampW = 350, rH = rampW * Math.tan(degToRad(Math.min(theta, 65)));
+      const clampH = Math.min(rH, 180);
+      const sc = clampH / Math.max(rH, 1);
+      const rW2 = rampW * sc, rH2 = clampH;
+      const ox = 120, oy = 230;
+      const frac = 0.45;
+      const rad = degToRad(theta);
+      const px = ox + (1 - frac) * rW2;
+      const py = oy - frac * rH2;
+      const maxF = Math.max(Fapp, physics.Wpar, physics.fk, physics.W, 1);
+      const regimeColor = physics.regime === "equilibrium" ? COLORS.accent : physics.regime === "accelerating up" ? COLORS.fNormal : COLORS.fWeight;
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Applied Force (up ramp)" value={Fapp} min={0} max={200} step={1} onChange={setFapp} unit="N" />
+              <Slider label={`Incline Angle (${THETA})`} value={theta} min={5} max={60} step={1} onChange={setTheta} unit={DEG} />
+              <Slider label="Mass (m)" value={m} min={0.5} max={50} step={0.5} onChange={setM} unit="kg" />
+              <Slider label={`${MU}k (kinetic friction)`} value={muK} min={0} max={0.8} step={0.01} onChange={setMuK} unit="" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Forces Along Ramp", style: { color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `F_net = F ${MINUS} mg sin${THETA} ${MINUS} ${MU}k${CDOT}mg cos${THETA}` },
+              { text: `F_net = ${Fapp} ${MINUS} ${physics.Wpar} ${MINUS} ${physics.fk}` },
+              { text: `F_net = ${physics.Fnet} N`, style: { color: COLORS.fNet } },
+              { text: `a = ${physics.a} m/s\u00B2`, style: { color: COLORS.fNet } },
+            ]} />
+          }
+          svg={
+            <Panel title="FORCE DIAGRAM">
+              <svg viewBox="0 0 600 270" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                <polygon points={`${ox},${oy} ${ox + rW2},${oy} ${ox},${oy - rH2}`} fill="none" stroke={COLORS.border} strokeWidth={2} />
+                <line x1={30} y1={oy} x2={570} y2={oy} stroke={COLORS.border} strokeWidth={1} />
+                <path d={`M ${ox + 35},${oy} A 35 35 0 0 0 ${ox + 35 * Math.cos(rad)},${oy - 35 * Math.sin(rad)}`} fill="none" stroke={COLORS.textDim} strokeWidth={1} />
+                <text x={ox + 45} y={oy - 6} fill={COLORS.textDim} fontSize={10} fontFamily="'JetBrains Mono'">{theta}{DEG}</text>
+                {/* Block — bottom edge on ramp surface */}
+                <g transform={`translate(${px},${py}) rotate(${-theta})`}>
+                  <rect x={-22} y={-22} width={44} height={22} fill={COLORS.panel} stroke={COLORS.text} strokeWidth={1.5} rx={3} />
+                  <text x={0} y={-8} fill={COLORS.textDim} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">{m}kg</text>
+                </g>
+                {/* Status */}
+                <text x={300} y={25} fill={regimeColor} fontSize={13} fontFamily="'Orbitron'" textAnchor="middle" fontWeight="bold">
+                  {physics.regime.toUpperCase()}
+                </text>
+                {/* Applied force up ramp */}
+                {Fapp > 0 && <ForceArrow x={px} y={py} angle={theta} length={forceToLen(Fapp, maxF, 80)} color={COLORS.fApplied} label="F" />}
+                {/* Gravity parallel */}
+                <ForceArrow x={px} y={py} angle={180 + theta} length={forceToLen(physics.Wpar, maxF, 80)} color={COLORS.fWeight} label={`mg sin${THETA}`} labelOffset={16} />
+                {/* Friction */}
+                {physics.fk > 0 && <ForceArrow x={px} y={py} angle={180 + theta} length={forceToLen(physics.fk, maxF, 60)} color={COLORS.fFriction} label="fk" labelOffset={-16} strokeWidth={2} />}
+                {/* Normal */}
+                <ForceArrow x={px} y={py} angle={90 + theta} length={forceToLen(physics.N, maxF, 70)} color={COLORS.fNormal} label="N" labelOffset={18} />
+              </svg>
+            </Panel>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="Applied Force (F)" value={Fapp} unit="N" color={COLORS.fApplied} />
+              <MetricRow label={`Gravity parallel (mg sin${THETA})`} value={physics.Wpar} unit="N" color={COLORS.fWeight} />
+              <MetricRow label="Friction (fk)" value={physics.fk} unit="N" color={COLORS.fFriction} />
+              <MetricRow label="Normal Force (N)" value={physics.N} unit="N" color={COLORS.fNormal} />
+              <MetricRow label="Net Force" value={physics.Fnet} unit="N" color={COLORS.fNet} />
+              <MetricRow label="Acceleration" value={physics.a} unit={`m/s\u00B2`} color={COLORS.fNet} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 5: ATWOOD MACHINE
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Atwood() {
+      const [m1, setM1] = useState(10);
+      const [m2, setM2] = useState(5);
+
+      const physics = useMemo(() => {
+        const W1 = m1 * G, W2 = m2 * G;
+        const a = ((m1 - m2) * G) / (m1 + m2);
+        const T = (2 * m1 * m2 * G) / (m1 + m2);
+        return { W1: round2(W1), W2: round2(W2), a: round2(a), T: round2(T) };
+      }, [m1, m2]);
+
+      const hints = useMemo(() => {
+        const h = [];
+        if (m1 === m2) h.push({ icon: "\u2696\uFE0F", text: "Equal masses \u2014 perfect equilibrium! a = 0 and tension T = mg for each mass." });
+        if (m1 > m2 * 5) h.push({ icon: "\uD83D\uDCA8", text: `When one mass dominates, the acceleration approaches g (free fall) and tension approaches 2${CDOT}m${SUB2}${CDOT}g = ${round2(2 * m2 * G)} N.` });
+        h.push({ icon: "\uD83D\uDD17", text: "The tension is the SAME everywhere in the rope \u2014 this is the massless-string assumption. It's the key constraint that lets us solve the system." });
+        return h;
+      }, [m1, m2]);
+
+      const pulleyR = 25;
+      const pCx = 300, pCy = 60;
+      const leftX = pCx - 80, rightX = pCx + 80;
+      const leftY = m1 >= m2 ? 180 : 140;
+      const rightY = m2 > m1 ? 180 : 140;
+      const bw = 55, bh = 40;
+      const maxF = Math.max(physics.W1, physics.W2, physics.T, 1);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label={`Mass 1 / left (m${SUB1})`} value={m1} min={0.5} max={50} step={0.5} onChange={setM1} unit="kg" />
+              <Slider label={`Mass 2 / right (m${SUB2})`} value={m2} min={0.5} max={50} step={0.5} onChange={setM2} unit="kg" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Atwood Machine", style: { color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `For m${SUB1}: m${SUB1}g ${MINUS} T = m${SUB1}a` },
+              { text: `For m${SUB2}: T ${MINUS} m${SUB2}g = m${SUB2}a` },
+              { text: "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" },
+              { text: `a = (m${SUB1}${MINUS}m${SUB2})g / (m${SUB1}+m${SUB2})`, style: { color: COLORS.fNet } },
+              { text: `a = ${physics.a} m/s\u00B2`, style: { color: COLORS.fNet } },
+              { text: `T = 2m${SUB1}m${SUB2}g / (m${SUB1}+m${SUB2})`, style: { color: COLORS.fTension } },
+              { text: `T = ${physics.T} N`, style: { color: COLORS.fTension } },
+            ]} />
+          }
+          svg={
+            <Panel title="DIAGRAM">
+              <svg viewBox="0 0 600 270" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                {/* Ceiling & support */}
+                <line x1={200} y1={30} x2={400} y2={30} stroke={COLORS.border} strokeWidth={2} />
+                <line x1={pCx} y1={30} x2={pCx} y2={pCy - pulleyR} stroke={COLORS.textDim} strokeWidth={2} />
+                {/* Pulley */}
+                <circle cx={pCx} cy={pCy} r={pulleyR} fill="none" stroke={COLORS.text} strokeWidth={2} />
+                <circle cx={pCx} cy={pCy} r={4} fill={COLORS.textDim} />
+                {/* Strings */}
+                <line x1={pCx - pulleyR} y1={pCy} x2={leftX} y2={leftY - bh / 2} stroke={COLORS.textDim} strokeWidth={1.5} />
+                <line x1={pCx + pulleyR} y1={pCy} x2={rightX} y2={rightY - bh / 2} stroke={COLORS.textDim} strokeWidth={1.5} />
+                {/* Left block */}
+                <rect x={leftX - bw / 2} y={leftY - bh / 2} width={bw} height={bh} fill={COLORS.panel} stroke={COLORS.fApplied} strokeWidth={2} rx={4} />
+                <text x={leftX} y={leftY + 4} fill={COLORS.fApplied} fontSize={12} fontFamily="'JetBrains Mono'" textAnchor="middle" fontWeight="bold">m{SUB1}={m1}</text>
+                {/* Right block */}
+                <rect x={rightX - bw / 2} y={rightY - bh / 2} width={bw} height={bh} fill={COLORS.panel} stroke={COLORS.fNet} strokeWidth={2} rx={4} />
+                <text x={rightX} y={rightY + 4} fill={COLORS.fNet} fontSize={12} fontFamily="'JetBrains Mono'" textAnchor="middle" fontWeight="bold">m{SUB2}={m2}</text>
+                {/* Force arrows */}
+                <ForceArrow x={leftX - bw / 2 - 5} y={leftY} angle={-90} length={forceToLen(physics.W1, maxF, 70)} color={COLORS.fWeight} label={`W${SUB1}`} labelOffset={-16} />
+                <ForceArrow x={leftX + bw / 2 + 5} y={leftY} angle={90} length={forceToLen(physics.T, maxF, 70)} color={COLORS.fTension} label="T" labelOffset={16} />
+                <ForceArrow x={rightX + bw / 2 + 5} y={rightY} angle={-90} length={forceToLen(physics.W2, maxF, 70)} color={COLORS.fWeight} label={`W${SUB2}`} labelOffset={16} />
+                <ForceArrow x={rightX - bw / 2 - 5} y={rightY} angle={90} length={forceToLen(physics.T, maxF, 70)} color={COLORS.fTension} label="T" labelOffset={-16} />
+                {/* Acceleration arrows */}
+                {Math.abs(physics.a) > 0.01 && <>
+                  <ForceArrow x={leftX} y={leftY + bh / 2 + 8} angle={physics.a > 0 ? -90 : 90} length={30} color={COLORS.fNet} label="a" dashed />
+                  <ForceArrow x={rightX} y={rightY - bh / 2 - 8} angle={physics.a > 0 ? 90 : -90} length={30} color={COLORS.fNet} label="a" dashed />
+                </>}
+              </svg>
+            </Panel>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label={`Weight m${SUB1}`} value={physics.W1} unit="N" color={COLORS.fWeight} />
+              <MetricRow label={`Weight m${SUB2}`} value={physics.W2} unit="N" color={COLORS.fWeight} />
+              <MetricRow label="Tension (T)" value={physics.T} unit="N" color={COLORS.fTension} />
+              <MetricRow label="Acceleration (a)" value={physics.a} unit={`m/s\u00B2`} color={COLORS.fNet} />
+              <MetricRow label="Heavier Side" value={m1 > m2 ? `Left (m${SUB1})` : m2 > m1 ? `Right (m${SUB2})` : "Equal"} unit="" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 6: HANGING SIGNS (TENSION)
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_HangingSigns() {
+      const [W, setW] = useState(200);
+      const [theta1, setTheta1] = useState(45);
+      const [theta2, setTheta2] = useState(45);
+
+      const physics = useMemo(() => {
+        const r1 = degToRad(theta1), r2 = degToRad(theta2);
+        const sinSum = Math.sin(r1 + r2);
+        if (sinSum < 0.001) return { T1: 0, T2: 0, T1x: 0, T1y: 0, T2x: 0, T2y: 0, warning: "Angles too shallow" };
+        const T1 = W * Math.cos(r2) / sinSum;
+        const T2 = W * Math.cos(r1) / sinSum;
+        return {
+          T1: round2(T1), T2: round2(T2),
+          T1x: round2(T1 * Math.cos(r1)), T1y: round2(T1 * Math.sin(r1)),
+          T2x: round2(T2 * Math.cos(r2)), T2y: round2(T2 * Math.sin(r2)),
+          warning: null,
+        };
+      }, [W, theta1, theta2]);
+
+      const hints = useMemo(() => {
+        const h = [];
+        if (theta1 === theta2) h.push({ icon: "\u2696\uFE0F", text: `Symmetric setup! T${SUB1} = T${SUB2} = W / (2 sin ${THETA}) = ${round2(W / (2 * Math.sin(degToRad(theta1))))} N. As the cables become more horizontal, tension skyrockets.` });
+        if (theta1 < 20 || theta2 < 20) h.push({ icon: "\u26A0\uFE0F", text: "Nearly horizontal cables carry enormous tension! This is why real cables always sag \u2014 a perfectly horizontal cable would need infinite tension to support any weight." });
+        if (theta1 !== theta2) h.push({ icon: "\uD83D\uDCD0", text: "The steeper cable carries LESS tension. The more vertical cable supports more of the weight directly, so it doesn't need as much total force." });
+        h.push({ icon: "\uD83D\uDD17", text: `This is static equilibrium: ${SUM}Fx = 0 and ${SUM}Fy = 0. The horizontal components of T${SUB1} and T${SUB2} cancel, while their vertical components sum to W.` });
+        return h;
+      }, [W, theta1, theta2]);
+
+      const jx = 300, jy = 160;
+      const ceilY = 40;
+      const r1 = degToRad(theta1), r2 = degToRad(theta2);
+      const cableLen = 120;
+      const l1x = jx - cableLen * Math.cos(r1), l1y = jy - cableLen * Math.sin(r1);
+      const l2x = jx + cableLen * Math.cos(r2), l2y = jy - cableLen * Math.sin(r2);
+      const maxT = Math.max(physics.T1, physics.T2, W, 1);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Sign Weight (W)" value={W} min={10} max={500} step={5} onChange={setW} unit="N" />
+              <Slider label={`Left Cable Angle (${THETA}${SUB1})`} value={theta1} min={10} max={80} step={1} onChange={setTheta1} unit={DEG} />
+              <Slider label={`Right Cable Angle (${THETA}${SUB2})`} value={theta2} min={10} max={80} step={1} onChange={setTheta2} unit={DEG} />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Static Equilibrium", style: { color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `${SUM}Fx = 0: T${SUB1} cos${THETA}${SUB1} = T${SUB2} cos${THETA}${SUB2}` },
+              { text: `${SUM}Fy = 0: T${SUB1} sin${THETA}${SUB1} + T${SUB2} sin${THETA}${SUB2} = W` },
+              { text: "\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500" },
+              { text: `T${SUB1} = W cos${THETA}${SUB2} / sin(${THETA}${SUB1}+${THETA}${SUB2})`, style: { color: COLORS.fTension } },
+              { text: `T${SUB1} = ${physics.T1} N`, style: { color: COLORS.fTension } },
+              { text: `T${SUB2} = W cos${THETA}${SUB1} / sin(${THETA}${SUB1}+${THETA}${SUB2})`, style: { color: COLORS.fTension } },
+              { text: `T${SUB2} = ${physics.T2} N`, style: { color: COLORS.fTension } },
+            ]} />
+          }
+          svg={
+            <Panel title="DIAGRAM">
+              <svg viewBox="0 0 600 280" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                {/* Ceiling */}
+                <rect x={50} y={ceilY - 10} width={500} height={14} fill={COLORS.border} rx={3} />
+                <circle cx={l1x} cy={Math.max(l1y, ceilY + 4)} r={4} fill={COLORS.textDim} />
+                <circle cx={l2x} cy={Math.max(l2y, ceilY + 4)} r={4} fill={COLORS.textDim} />
+                {/* Cables */}
+                <line x1={l1x} y1={Math.max(l1y, ceilY + 4)} x2={jx} y2={jy} stroke={COLORS.fTension} strokeWidth={2.5} />
+                <line x1={l2x} y1={Math.max(l2y, ceilY + 4)} x2={jx} y2={jy} stroke={COLORS.fTension} strokeWidth={2.5} />
+                {/* Angle arcs */}
+                <path d={`M ${jx - 30},${jy} A 30 30 0 0 0 ${jx - 30 * Math.cos(r1)},${jy - 30 * Math.sin(r1)}`} fill="none" stroke={COLORS.textDim} strokeWidth={1} />
+                <text x={jx - 45} y={jy - 12} fill={COLORS.textDim} fontSize={9} fontFamily="'JetBrains Mono'">{theta1}{DEG}</text>
+                <path d={`M ${jx + 30},${jy} A 30 30 0 0 1 ${jx + 30 * Math.cos(r2)},${jy - 30 * Math.sin(r2)}`} fill="none" stroke={COLORS.textDim} strokeWidth={1} />
+                <text x={jx + 22} y={jy - 12} fill={COLORS.textDim} fontSize={9} fontFamily="'JetBrains Mono'">{theta2}{DEG}</text>
+                {/* Junction */}
+                <circle cx={jx} cy={jy} r={5} fill={COLORS.text} />
+                {/* Sign */}
+                <rect x={jx - 45} y={jy + 15} width={90} height={50} fill={COLORS.panel} stroke={COLORS.fApplied} strokeWidth={2} rx={6} />
+                <text x={jx} y={jy + 38} fill={COLORS.fApplied} fontSize={11} fontFamily="'Orbitron'" textAnchor="middle">SIGN</text>
+                <text x={jx} y={jy + 53} fill={COLORS.textDim} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">W={W}N</text>
+                {/* Weight */}
+                <ForceArrow x={jx} y={jy + 68} angle={-90} length={forceToLen(W, maxT, 60)} color={COLORS.fWeight} label="W" labelOffset={16} />
+                {/* Tension arrows along cables */}
+                <ForceArrow x={jx} y={jy} angle={180 - theta1} length={forceToLen(physics.T1, maxT, 80)} color={COLORS.fTension} label={`T${SUB1}`} labelOffset={14} />
+                <ForceArrow x={jx} y={jy} angle={theta2} length={forceToLen(physics.T2, maxT, 80)} color={COLORS.fTension} label={`T${SUB2}`} labelOffset={14} />
+              </svg>
+            </Panel>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label={`Tension T${SUB1} (left)`} value={physics.T1} unit="N" color={COLORS.fTension} />
+              <MetricRow label={`Tension T${SUB2} (right)`} value={physics.T2} unit="N" color={COLORS.fTension} />
+              <MetricRow label={`T${SUB1} horizontal`} value={physics.T1x} unit="N" color={COLORS.fTension} />
+              <MetricRow label={`T${SUB2} horizontal`} value={physics.T2x} unit="N" color={COLORS.fTension} />
+              <MetricRow label={`T${SUB1} vertical`} value={physics.T1y} unit="N" color={COLORS.fTension} />
+              <MetricRow label={`T${SUB2} vertical`} value={physics.T2y} unit="N" color={COLORS.fTension} />
+              <MetricRow label="Weight (W)" value={W} unit="N" color={COLORS.fWeight} />
+              <MetricRow label={`Verify: T${SUB1}y + T${SUB2}y`} value={round2(physics.T1y + physics.T2y)} unit="N" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 7: WORK & ENERGY
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_WorkEnergy() {
+      const [F, setF] = useState(50);
+      const [fTheta, setFTheta] = useState(0);
+      const [d, setD] = useState(5);
+      const [m, setM] = useState(10);
+      const [muK, setMuK] = useState(0.1);
+
+      const physics = useMemo(() => {
+        const rad = degToRad(fTheta);
+        const Fh = F * Math.cos(rad);
+        const Fv = F * Math.sin(rad);
+        const N = Math.max(m * G - Fv, 0);
+        const fk = muK * N;
+        const Wapp = round2(F * d * Math.cos(rad));
+        const Wfric = round2(-fk * d);
+        const Wnet = round2(Wapp + Wfric);
+        const vf = Wnet > 0 ? round2(Math.sqrt(2 * Wnet / m)) : 0;
+        const liftoff = m * G - Fv <= 0;
+        return { Fh: round2(Fh), Fv: round2(Fv), N: round2(N), fk: round2(fk), Wapp, Wfric, Wnet, vf, liftoff };
+      }, [F, fTheta, d, m, muK]);
+
+      const barData = [
+        { name: "W_applied", value: physics.Wapp, fill: COLORS.fApplied },
+        { name: "W_friction", value: physics.Wfric, fill: COLORS.fFriction },
+        { name: "W_net", value: physics.Wnet, fill: COLORS.fNet },
+      ];
+
+      const hints = useMemo(() => {
+        const h = [];
+        if (fTheta === 0) h.push({ icon: "\u2705", text: `Force is fully horizontal \u2014 100% of it does work moving the block. cos(0${DEG}) = 1.` });
+        if (fTheta === 90) h.push({ icon: "\u274C", text: `Force is fully vertical \u2014 zero work on horizontal displacement! W = Fd${CDOT}cos(90${DEG}) = 0. The force is perpendicular to motion.` });
+        if (physics.Wnet < 0) h.push({ icon: "\u26A0\uFE0F", text: "Negative net work means the block would decelerate. If starting from rest, it wouldn't move \u2014 friction wins." });
+        if (physics.liftoff) h.push({ icon: "\uD83D\uDE80", text: "The vertical component of force exceeds weight \u2014 the block lifts off the surface! Normal force drops to zero." });
+        if (muK === 0 && fTheta === 0) h.push({ icon: "\u2728", text: "No friction and force along displacement: all work converts directly to kinetic energy. This is the simplest case of the work-energy theorem." });
+        h.push({ icon: "\uD83D\uDCD6", text: `Work-Energy Theorem: W_net = ${DELTA}KE. The net work done on an object equals its change in kinetic energy.` });
+        return h;
+      }, [fTheta, physics, muK]);
+
+      const cx = 300, cy = 140, bw = 60, bh = 40;
+      const maxF2 = Math.max(F, physics.fk, m * G, 1);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Applied Force (F)" value={F} min={0} max={200} step={1} onChange={setF} unit="N" />
+              <Slider label="Force Angle from horiz." value={fTheta} min={0} max={90} step={1} onChange={setFTheta} unit={DEG} />
+              <Slider label="Distance (d)" value={d} min={0} max={20} step={0.5} onChange={setD} unit="m" />
+              <Slider label="Mass (m)" value={m} min={0.5} max={50} step={0.5} onChange={setM} unit="kg" />
+              <Slider label={`${MU}k (friction)`} value={muK} min={0} max={0.5} step={0.01} onChange={setMuK} unit="" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Work-Energy Theorem", style: { color: COLORS.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `W_applied = F${CDOT}d${CDOT}cos(${THETA}) = ${physics.Wapp} J`, style: { color: COLORS.fApplied } },
+              { text: `W_friction = ${MINUS}fk${CDOT}d = ${physics.Wfric} J`, style: { color: COLORS.fFriction } },
+              { text: `W_net = ${physics.Wnet} J`, style: { color: COLORS.fNet } },
+              { text: `v_final = ${SQRT}(2${CDOT}W_net/m) = ${physics.vf} m/s` },
+            ]} />
+          }
+          svg={
+            <>
+              <Panel title="FORCE DIAGRAM">
+                <svg viewBox="0 0 600 240" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                  <line x1={50} y1={cy + bh / 2} x2={550} y2={cy + bh / 2} stroke={COLORS.border} strokeWidth={2} />
+                  {/* Distance markers */}
+                  <line x1={cx - bw / 2} y1={cy + bh / 2 + 15} x2={cx - bw / 2 + d * 20} y2={cy + bh / 2 + 15} stroke={COLORS.accent} strokeWidth={1} />
+                  <text x={cx - bw / 2 + d * 10} y={cy + bh / 2 + 28} fill={COLORS.accent} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">d = {d} m</text>
+                  {/* Block */}
+                  <rect x={cx - bw / 2} y={cy - bh / 2} width={bw} height={bh} fill={COLORS.panel} stroke={COLORS.text} strokeWidth={1.5} rx={4} />
+                  <text x={cx} y={cy + 4} fill={COLORS.textDim} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">{m}kg</text>
+                  {/* Weight & Normal */}
+                  <ForceArrow x={cx - 12} y={cy + bh / 2} angle={-90} length={forceToLen(m * G, maxF2, 70)} color={COLORS.fWeight} label="W" labelOffset={-16} />
+                  <ForceArrow x={cx + 12} y={cy - bh / 2} angle={90} length={forceToLen(physics.N, maxF2, 70)} color={COLORS.fNormal} label="N" labelOffset={16} />
+                  {/* Applied force at angle */}
+                  {F > 0 && <ForceArrow x={cx + bw / 2} y={cy} angle={fTheta} length={forceToLen(F, maxF2, 90)} color={COLORS.fApplied} label="F" />}
+                  {/* Horizontal component */}
+                  {F > 0 && fTheta > 0 && <ForceArrow x={cx + bw / 2} y={cy + 12} angle={0} length={forceToLen(physics.Fh, maxF2, 70)} color={COLORS.fApplied} dashed strokeWidth={1.5} label="Fh" labelOffset={-12} />}
+                  {/* Friction */}
+                  {physics.fk > 0 && <ForceArrow x={cx - bw / 2} y={cy} angle={180} length={forceToLen(physics.fk, maxF2, 70)} color={COLORS.fFriction} label="fk" />}
+                  {/* Angle arc */}
+                  {fTheta > 0 && F > 0 && (
+                    <path d={`M ${cx + bw / 2 + 25},${cy} A 25 25 0 0 0 ${cx + bw / 2 + 25 * Math.cos(degToRad(fTheta))},${cy - 25 * Math.sin(degToRad(fTheta))}`}
+                      fill="none" stroke={COLORS.textDim} strokeWidth={1} />
+                  )}
+                </svg>
+              </Panel>
+              <Panel title="ENERGY BAR CHART">
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={barData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
+                    <CartesianGrid stroke={COLORS.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fill: COLORS.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" }} />
+                    <YAxis tick={{ fill: COLORS.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" }}
+                      label={{ value: "Joules (J)", angle: -90, position: "insideLeft", offset: 10, style: { fill: COLORS.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" } }} />
+                    <ReferenceLine y={0} stroke={COLORS.textDim} />
+                    <Tooltip contentStyle={{ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono'", fontSize: 11 }} />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                      {barData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Panel>
+            </>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="Work (applied)" value={physics.Wapp} unit="J" color={COLORS.fApplied} />
+              <MetricRow label="Work (friction)" value={physics.Wfric} unit="J" color={COLORS.fFriction} />
+              <MetricRow label="Net Work" value={physics.Wnet} unit="J" color={COLORS.fNet} />
+              <MetricRow label="Final Speed (from rest)" value={physics.vf} unit="m/s" color={COLORS.accent} />
+              <MetricRow label="Normal Force" value={physics.N} unit="N" color={COLORS.fNormal} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MAIN COMPONENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function ForcesSimulator() {
+      const [activeTab, setActiveTab] = useState("forces1d");
+
+      const tabComponents = {
+        forces1d: Tab_Forces1D,
+        incline: Tab_InclinedPlane,
+        friction: Tab_Friction,
+        boxramp: Tab_BoxRamp,
+        atwood: Tab_Atwood,
+        hanging: Tab_HangingSigns,
+        work: Tab_WorkEnergy,
+      };
+
+      const ActiveComponent = tabComponents[activeTab];
+
+      return (
+        <div style={{ background: COLORS.bg, color: COLORS.text, minHeight: "100vh", padding: "20px 24px", fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ textAlign: "center", marginBottom: 16 }}>
+            <h1 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 20, fontWeight: 700, color: COLORS.accent, letterSpacing: 2, marginBottom: 4 }}>
+              NEWTON'S SECOND LAW &amp; FORCES
+            </h1>
+            <p style={{ color: COLORS.muted, fontSize: 12 }}>F = ma &mdash; explore forces, friction, tension, and work</p>
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 16, justifyContent: "center" }}>
+            {TABS.map((tab) => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                style={{
+                  background: activeTab === tab.id ? COLORS.accent : "transparent",
+                  color: activeTab === tab.id ? COLORS.bg : COLORS.textDim,
+                  border: `1px solid ${activeTab === tab.id ? COLORS.accent : COLORS.border}`,
+                  borderRadius: 6, padding: "6px 14px", fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace", cursor: "pointer", fontWeight: activeTab === tab.id ? 700 : 400,
+                  transition: "all 0.15s",
+                }}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <ActiveComponent />
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<ForcesSimulator />);
+  </script>
+</body>
+</html>

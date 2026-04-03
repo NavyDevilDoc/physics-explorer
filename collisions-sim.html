@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Energy &amp; Collisions Simulator</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+  <script crossorigin src="https://unpkg.com/prop-types@15/prop-types.min.js"></script>
+  <script crossorigin src="https://unpkg.com/recharts@2.15.3/umd/Recharts.js"></script>
+  <script crossorigin src="https://unpkg.com/@babel/standalone@7/babel.min.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #070c18; overflow-x: hidden; }
+    input[type="range"] { -webkit-appearance: none; appearance: none; outline: none; height: 4px; border-radius: 2px; }
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+      background: #00d4ff; cursor: pointer; border: 2px solid #070c18;
+    }
+    input[type="range"]:disabled::-webkit-slider-thumb { background: #475569; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <div style="background:#070c18;padding:8px 24px;font-family:'JetBrains Mono',monospace;">
+    <a href="index.html" style="color:#475569;font-size:11px;text-decoration:none;transition:color 0.2s;" onmouseover="this.style.color='#00d4ff'" onmouseout="this.style.color='#475569'">&larr; Physics Explorer</a>
+  </div>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useCallback, useRef, useEffect } = React;
+    const { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell, ReferenceLine } = Recharts;
+
+    // ═══════════════════════════════════════════════════════════════
+    // CONSTANTS
+    // ═══════════════════════════════════════════════════════════════
+
+    const G = 9.81;
+    const HALF = "\u00BD";
+    const SUB1 = "\u2081";
+    const SUB2 = "\u2082";
+    const CDOT = "\u00B7";
+    const DEG  = "\u00B0";
+    const DELTA = "\u0394";
+    const THETA = "\u03B8";
+    const MU = "\u03BC";
+    const SQRT = "\u221A";
+    const PRME = "\u2032"; // ′
+
+    const C = {
+      bg: "#070c18", panel: "#0a1220", border: "#1a2d4a",
+      accent: "#00d4ff", muted: "#475569", text: "#e2e8f0", textDim: "#94a3b8",
+      warning: "#eab308",
+      ke: "#ff6b35",      // kinetic energy — orange
+      pe: "#a855f7",      // potential energy — purple
+      spring: "#22c55e",  // spring PE — green
+      heat: "#ef4444",    // energy lost to heat — red
+      total: "#00d4ff",   // total energy — cyan
+      obj1: "#ff6b35",    // object 1 — orange
+      obj2: "#00d4ff",    // object 2 — cyan
+      momentum: "#a855f7", // momentum — purple
+    };
+
+    const TABS = [
+      { id: "kepe",      label: "KE & PE" },
+      { id: "conserve",  label: "Energy Conservation" },
+      { id: "springs",   label: "Springs" },
+      { id: "elast",      label: "Elastic Collisions" },
+      { id: "inelastic", label: "Inelastic Collisions" },
+      { id: "playground", label: "Collision Lab" },
+    ];
+
+    function round2(n) { return Math.round(n * 100) / 100; }
+    function round1(n) { return Math.round(n * 10) / 10; }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SHARED COMPONENTS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Panel({ title, children, style }) {
+      return (
+        <div style={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 8, padding: 14, ...style }}>
+          {title && <div style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 11, color: C.accent, marginBottom: 10, letterSpacing: 1 }}>{title}</div>}
+          {children}
+        </div>
+      );
+    }
+
+    function Slider({ label, value, min, max, step, onChange, unit, disabled }) {
+      const pct = ((value - min) / (max - min)) * 100;
+      return (
+        <div style={{ marginBottom: 12, opacity: disabled ? 0.4 : 1 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontFamily: "'JetBrains Mono', monospace", fontSize: 12 }}>
+            <span style={{ color: C.textDim }}>{label}</span>
+            <span style={{ color: C.accent }}>{value}{unit && <span style={{ color: C.muted, marginLeft: 2 }}>{unit}</span>}</span>
+          </div>
+          <input type="range" min={min} max={max} step={step} value={value} disabled={disabled}
+            onChange={(e) => onChange(parseFloat(e.target.value))}
+            style={{ width: "100%", accentColor: C.accent,
+              background: `linear-gradient(to right, ${C.accent} 0%, ${C.accent} ${pct}%, ${C.border} ${pct}%, ${C.border} 100%)`,
+              height: 4, borderRadius: 2, cursor: disabled ? "not-allowed" : "pointer" }} />
+        </div>
+      );
+    }
+
+    function MetricRow({ label, value, unit, color }) {
+      return (
+        <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 4, fontSize: 12, fontFamily: "'JetBrains Mono', monospace" }}>
+          <span style={{ color: C.muted }}>{label}</span>
+          <span>
+            <span style={{ color: color || C.text, fontWeight: 500 }}>{value}</span>
+            <span style={{ color: C.muted, marginLeft: 4, fontSize: 10 }}>{unit}</span>
+          </span>
+        </div>
+      );
+    }
+
+    function HintBox({ hints }) {
+      if (!hints || hints.length === 0) return null;
+      return (
+        <Panel title="INSIGHTS">
+          {hints.map((h, i) => (
+            <div key={i} style={{ display: "flex", gap: 8, marginBottom: 6, fontSize: 11, color: C.textDim, lineHeight: 1.5 }}>
+              <span style={{ flexShrink: 0 }}>{h.icon}</span><span>{h.text}</span>
+            </div>
+          ))}
+        </Panel>
+      );
+    }
+
+    function EquationBlock({ lines }) {
+      return (
+        <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: 11, color: C.textDim, lineHeight: 1.8, padding: "8px 12px", background: "rgba(0,0,0,0.3)", borderRadius: 6, border: `1px solid ${C.border}` }}>
+          {lines.map((l, i) => <div key={i} style={l.style || {}}>{l.text}</div>)}
+        </div>
+      );
+    }
+
+    function TabLayout({ sliders, svg, results, equations, hints }) {
+      return (
+        <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
+          <div style={{ width: 280, flexShrink: 0, display: "flex", flexDirection: "column", gap: 12 }}>
+            {sliders}
+            {equations}
+          </div>
+          <div style={{ flex: 1, minWidth: 380, display: "flex", flexDirection: "column", gap: 12 }}>
+            {svg}
+            {results}
+            {hints}
+          </div>
+        </div>
+      );
+    }
+
+    // Reusable energy bar chart
+    function EnergyBarChart({ data, height }) {
+      return (
+        <Panel title="ENERGY BAR CHART">
+          <ResponsiveContainer width="100%" height={height || 200}>
+            <BarChart data={data} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
+              <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+              <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" }} />
+              <YAxis tick={{ fill: C.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" }}
+                label={{ value: "Joules (J)", angle: -90, position: "insideLeft", offset: 10, style: { fill: C.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" } }} />
+              <ReferenceLine y={0} stroke={C.textDim} />
+              <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono'", fontSize: 11 }} />
+              <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                {data.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </Panel>
+      );
+    }
+
+    // SVG arrow for velocity/momentum visualization
+    function VelArrow({ x, y, length, color, label, up }) {
+      if (Math.abs(length) < 1) return null;
+      const dir = length >= 0 ? 1 : -1;
+      const absLen = Math.abs(length);
+      const ex = x + dir * absLen;
+      const hw = 5, hl = 8;
+      return (
+        <g>
+          <line x1={x} y1={y} x2={ex} y2={y} stroke={color} strokeWidth={2.5} />
+          <polygon points={`${ex},${y} ${ex - dir * hl},${y - hw} ${ex - dir * hl},${y + hw}`} fill={color} />
+          {label && <text x={(x + ex) / 2} y={up ? y - 10 : y + 16} fill={color} fontSize={10}
+            fontFamily="'JetBrains Mono'" textAnchor="middle">{label}</text>}
+        </g>
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 1: KE & PE
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_KEPE() {
+      const [m, setM] = useState(2);
+      const [h, setH] = useState(10);
+      const [v, setV] = useState(0);
+
+      // Animation state
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [animFrac, setAnimFrac] = useState(0); // 0 = top, 1 = ground
+      const rafRef = useRef(null);
+      const lastFrameRef = useRef(null);
+
+      const physics = useMemo(() => {
+        const KE = 0.5 * m * v * v;
+        const PE = m * G * h;
+        const total = KE + PE;
+        const vGround = Math.sqrt(2 * G * h + v * v);
+        // Flight time from h with initial v downward: h = vt + ½gt² → t via quadratic
+        const tFall = h > 0 ? (-v + Math.sqrt(v * v + 2 * G * h)) / G : 0;
+        return { KE: round2(KE), PE: round2(PE), total: round2(total), vGround: round2(vGround), tFall: round2(tFall) };
+      }, [m, h, v]);
+
+      // Live values during animation
+      const live = useMemo(() => {
+        const curH = h * (1 - animFrac);
+        const curPE = m * G * curH;
+        const curKE = Math.max(physics.total - curPE, 0);
+        const curV = Math.sqrt(2 * curKE / m);
+        return { h: round1(curH), PE: round1(curPE), KE: round1(curKE), v: round2(curV) };
+      }, [animFrac, m, h, physics.total]);
+
+      // Stacked bar data
+      const fallData = useMemo(() => {
+        const steps = 5;
+        const points = [];
+        for (let i = 0; i <= steps; i++) {
+          const frac = i / steps;
+          const curH = h * (1 - frac);
+          const curPE = m * G * curH;
+          const curKE = Math.max(physics.total - curPE, 0);
+          points.push({ name: `h=${round1(curH)}m`, KE: round1(curKE), PE: round1(curPE) });
+        }
+        return points;
+      }, [m, h, physics.total]);
+
+      const stopAnim = useCallback(() => {
+        if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+        lastFrameRef.current = null;
+        setIsPlaying(false);
+      }, []);
+
+      const animate = useCallback((ts) => {
+        if (!lastFrameRef.current) { lastFrameRef.current = ts; rafRef.current = requestAnimationFrame(animate); return; }
+        const dt = (ts - lastFrameRef.current) / 1000;
+        lastFrameRef.current = ts;
+        const speed = physics.tFall > 0 ? 1 / physics.tFall : 2;
+        setAnimFrac(prev => {
+          const next = prev + dt * speed;
+          if (next >= 1) { stopAnim(); return 1; }
+          return next;
+        });
+        rafRef.current = requestAnimationFrame(animate);
+      }, [physics.tFall, stopAnim]);
+
+      const togglePlay = useCallback(() => {
+        if (isPlaying) { stopAnim(); return; }
+        if (animFrac >= 1) setAnimFrac(0);
+        setIsPlaying(true);
+        lastFrameRef.current = null;
+        rafRef.current = requestAnimationFrame(animate);
+      }, [isPlaying, animFrac, stopAnim, animate]);
+
+      const resetAnim = useCallback(() => { stopAnim(); setAnimFrac(0); }, [stopAnim]);
+
+      useEffect(() => { stopAnim(); setAnimFrac(0); }, [m, h, v]);
+      useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+      const hints = useMemo(() => {
+        const out = [];
+        if (v === 0 && h > 0) out.push({ icon: "\uD83C\uDFAF", text: `Dropped from rest at ${h}m, the object hits the ground at ${physics.vGround} m/s. All PE converts to KE.` });
+        if (v > 0 && h === 0) out.push({ icon: "\u26A1", text: "No height means no potential energy. All energy is kinetic." });
+        out.push({ icon: "\uD83D\uDD04", text: "Energy is never created or destroyed \u2014 only transformed. As the object falls, PE decreases and KE increases by exactly the same amount." });
+        return out;
+      }, [v, h, physics]);
+
+      // SVG falling ball
+      const svgH = 220, topY = 30, groundY = svgH - 20;
+      const ballY = topY + animFrac * (groundY - topY);
+      const barW = 30, barX1 = 420, barX2 = 460;
+      const maxE = Math.max(physics.total, 1);
+      const barMaxH = groundY - topY - 10;
+      const peBarH = (live.PE / maxE) * barMaxH;
+      const keBarH = (live.KE / maxE) * barMaxH;
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Mass (m)" value={m} min={0.5} max={20} step={0.5} onChange={setM} unit="kg" />
+              <Slider label="Height (h)" value={h} min={0} max={50} step={1} onChange={setH} unit="m" />
+              <Slider label="Velocity (v)" value={v} min={0} max={30} step={0.5} onChange={setV} unit="m/s" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Energy Equations", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `KE = ${HALF}mv\u00B2 = ${physics.KE} J`, style: { color: C.ke } },
+              { text: `PE = mgh = ${physics.PE} J`, style: { color: C.pe } },
+              { text: `E_total = KE + PE = ${physics.total} J`, style: { color: C.total } },
+              { text: `v at ground = ${SQRT}(2gh + v\u00B2) = ${physics.vGround} m/s` },
+            ]} />
+          }
+          svg={
+            <>
+              <Panel title="FALLING OBJECT">
+                <svg viewBox={`0 0 520 ${svgH}`} style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                  {/* Height scale */}
+                  <line x1={100} y1={topY} x2={100} y2={groundY} stroke={C.border} strokeWidth={1} strokeDasharray="4 3" />
+                  <text x={90} y={topY + 4} fill={C.pe} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="end">{h}m</text>
+                  <text x={90} y={groundY} fill={C.textDim} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="end">0m</text>
+                  {/* Ground */}
+                  <line x1={50} y1={groundY} x2={350} y2={groundY} stroke={C.border} strokeWidth={2} />
+                  {/* Ball */}
+                  <circle cx={200} cy={ballY} r={12} fill={C.ke} opacity={0.9} />
+                  {/* Live height label */}
+                  <text x={225} y={ballY + 4} fill={C.text} fontSize={10} fontFamily="'JetBrains Mono'">h={live.h}m</text>
+                  <text x={225} y={ballY + 18} fill={C.textDim} fontSize={9} fontFamily="'JetBrains Mono'">v={live.v}m/s</text>
+                  {/* Live energy bars */}
+                  <text x={barX1 + 15} y={topY - 2} fill={C.textDim} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">PE</text>
+                  <rect x={barX1} y={groundY - peBarH} width={barW} height={Math.max(peBarH, 1)} fill={C.pe} rx={2} />
+                  <text x={barX2 + 15} y={topY - 2} fill={C.textDim} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">KE</text>
+                  <rect x={barX2} y={groundY - keBarH} width={barW} height={Math.max(keBarH, 1)} fill={C.ke} rx={2} />
+                  {/* Values on bars */}
+                  <text x={barX1 + 15} y={groundY + 14} fill={C.pe} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">{live.PE}J</text>
+                  <text x={barX2 + 15} y={groundY + 14} fill={C.ke} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">{live.KE}J</text>
+                </svg>
+                {/* Playback controls */}
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button onClick={togglePlay}
+                    style={{ background: C.accent, color: C.bg, border: "none", borderRadius: 4, padding: "5px 14px", fontSize: 11, fontFamily: "'JetBrains Mono'", fontWeight: 700, cursor: "pointer" }}>
+                    {isPlaying ? "\u23F8 Pause" : "\u25B6 Drop"}
+                  </button>
+                  <button onClick={resetAnim}
+                    style={{ background: "transparent", color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, fontFamily: "'JetBrains Mono'", cursor: "pointer" }}>
+                    &#8634; Reset
+                  </button>
+                </div>
+              </Panel>
+              <Panel title="ENERGY DURING FALL">
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={fallData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 9, fontFamily: "'JetBrains Mono'" }} />
+                    <YAxis tick={{ fill: C.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" }} />
+                    <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono'", fontSize: 11 }} />
+                    <Bar dataKey="PE" stackId="a" fill={C.pe} name="PE" />
+                    <Bar dataKey="KE" stackId="a" fill={C.ke} name="KE" radius={[4, 4, 0, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+                <div style={{ display: "flex", gap: 16, justifyContent: "center", fontSize: 10, marginTop: 4 }}>
+                  <span><span style={{ color: C.pe }}>{"\u2588"}</span> PE</span>
+                  <span><span style={{ color: C.ke }}>{"\u2588"}</span> KE</span>
+                </div>
+              </Panel>
+            </>
+          }
+          results={
+            <Panel title="LIVE READOUT">
+              <MetricRow label="Height" value={live.h} unit="m" />
+              <MetricRow label="Velocity" value={live.v} unit="m/s" />
+              <MetricRow label="KE" value={live.KE} unit="J" color={C.ke} />
+              <MetricRow label="PE" value={live.PE} unit="J" color={C.pe} />
+              <MetricRow label="Total Energy" value={physics.total} unit="J" color={C.total} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 2: ENERGY CONSERVATION (RAMP)
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Conservation() {
+      const [m, setM] = useState(3);
+      const [h, setH] = useState(15);
+      const [friction, setFriction] = useState(false);
+      const [muK, setMuK] = useState(0.15);
+      const [angle, setAngle] = useState(30);
+
+      const physics = useMemo(() => {
+        const rad = angle * Math.PI / 180;
+        const PE0 = m * G * h;
+        const rampLen = h / Math.sin(rad);
+        const N = m * G * Math.cos(rad);
+        const Wfriction = friction ? muK * N * rampLen : 0;
+        const KEbottom = Math.max(PE0 - Wfriction, 0);
+        const vBottom = Math.sqrt(2 * KEbottom / m);
+        const pctLost = PE0 > 0 ? round1((Wfriction / PE0) * 100) : 0;
+        return {
+          PE0: round2(PE0), rampLen: round2(rampLen), Wfriction: round2(Wfriction),
+          KEbottom: round2(KEbottom), vBottom: round2(vBottom), pctLost,
+        };
+      }, [m, h, friction, muK, angle]);
+
+      const barData = useMemo(() => {
+        const d = [
+          { name: "PE (top)", value: physics.PE0, fill: C.pe },
+          { name: "KE (bottom)", value: physics.KEbottom, fill: C.ke },
+        ];
+        if (friction) d.push({ name: "Heat (lost)", value: physics.Wfriction, fill: C.heat });
+        return d;
+      }, [physics, friction]);
+
+      const hints = useMemo(() => {
+        const out = [];
+        if (!friction) out.push({ icon: "\u2728", text: "No friction: 100% of potential energy converts to kinetic energy. PE at top = KE at bottom." });
+        if (friction && physics.pctLost > 30) out.push({ icon: "\uD83D\uDD25", text: `${physics.pctLost}% of energy lost to heat! Friction converts ordered motion into random thermal energy.` });
+        if (friction) out.push({ icon: "\u26A0\uFE0F", text: "With friction, total mechanical energy (KE + PE) is NOT conserved \u2014 but total energy (including heat) IS. Energy is never destroyed." });
+        out.push({ icon: "\uD83C\uDFA2", text: `Ramp length is ${physics.rampLen}m. A shallower angle means a longer ramp, which means more distance for friction to act \u2014 even though the height (and PE) is the same.` });
+        return out;
+      }, [physics, friction]);
+
+      // SVG ramp
+      const ox = 80, oy = 200, rampPx = 380;
+      const rad = angle * Math.PI / 180;
+      const rH = Math.min(rampPx * Math.tan(rad), 170);
+      const rW = rH / Math.tan(rad);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Mass (m)" value={m} min={0.5} max={20} step={0.5} onChange={setM} unit="kg" />
+              <Slider label="Height (h)" value={h} min={1} max={40} step={1} onChange={setH} unit="m" />
+              <Slider label={`Ramp Angle (${THETA})`} value={angle} min={10} max={70} step={1} onChange={setAngle} unit={DEG} />
+              <div style={{ marginTop: 4, marginBottom: 8, display: "flex", alignItems: "center", gap: 8 }}>
+                <button onClick={() => setFriction(!friction)}
+                  style={{ background: friction ? C.heat : C.border, color: friction ? "#fff" : C.muted, border: "none", borderRadius: 12, padding: "3px 12px", fontSize: 10, fontFamily: "'JetBrains Mono'", cursor: "pointer", fontWeight: 700 }}>
+                  {friction ? "Friction ON" : "Friction OFF"}
+                </button>
+              </div>
+              {friction && <Slider label={`${MU}k`} value={muK} min={0.05} max={0.5} step={0.01} onChange={setMuK} unit="" />}
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Energy Conservation", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `PE_top = mgh = ${physics.PE0} J`, style: { color: C.pe } },
+              { text: friction ? `W_friction = ${MU}k${CDOT}N${CDOT}d = ${physics.Wfriction} J` : "W_friction = 0 (no friction)", style: { color: C.heat } },
+              { text: `KE_bottom = PE_top ${friction ? `- W_friction` : ""} = ${physics.KEbottom} J`, style: { color: C.ke } },
+              { text: `v_bottom = ${SQRT}(2${CDOT}KE/m) = ${physics.vBottom} m/s` },
+            ]} />
+          }
+          svg={
+            <>
+              <Panel title="RAMP DIAGRAM">
+                <svg viewBox="0 0 550 230" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                  <polygon points={`${ox},${oy} ${ox + rW},${oy} ${ox},${oy - rH}`} fill="none" stroke={C.border} strokeWidth={2} />
+                  <line x1={30} y1={oy} x2={520} y2={oy} stroke={C.border} strokeWidth={1} />
+                  {/* Height label */}
+                  <line x1={ox - 15} y1={oy} x2={ox - 15} y2={oy - rH} stroke={C.pe} strokeWidth={1} strokeDasharray="4 3" />
+                  <text x={ox - 25} y={oy - rH / 2} fill={C.pe} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="end">h={h}m</text>
+                  {/* Ball at top */}
+                  <circle cx={ox + 10} cy={oy - rH - 8} r={8} fill={C.pe} opacity={0.8} />
+                  <text x={ox + 10} y={oy - rH - 22} fill={C.pe} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="middle">PE={physics.PE0}J</text>
+                  {/* Ball at bottom */}
+                  <circle cx={ox + rW + 40} cy={oy - 8} r={8} fill={C.ke} opacity={0.8} />
+                  <text x={ox + rW + 40} y={oy - 22} fill={C.ke} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="middle">KE={physics.KEbottom}J</text>
+                  {/* Velocity arrow at bottom */}
+                  {physics.vBottom > 0 && <VelArrow x={ox + rW + 55} y={oy - 8} length={50} color={C.ke} label={`v=${physics.vBottom}m/s`} up />}
+                  {/* Friction indicator */}
+                  {friction && <text x={ox + rW / 2} y={oy - rH / 2 - 5} fill={C.heat} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle" transform={`rotate(${-angle}, ${ox + rW / 2}, ${oy - rH / 2})`}>~ friction ~</text>}
+                  {/* Angle */}
+                  <text x={ox + 45} y={oy - 6} fill={C.textDim} fontSize={10} fontFamily="'JetBrains Mono'">{angle}{DEG}</text>
+                </svg>
+              </Panel>
+              <EnergyBarChart data={barData} height={180} />
+            </>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="PE at top" value={physics.PE0} unit="J" color={C.pe} />
+              <MetricRow label="KE at bottom" value={physics.KEbottom} unit="J" color={C.ke} />
+              {friction && <MetricRow label="Energy lost to heat" value={physics.Wfriction} unit="J" color={C.heat} />}
+              {friction && <MetricRow label="% lost" value={physics.pctLost} unit="%" color={C.heat} />}
+              <MetricRow label="Speed at bottom" value={physics.vBottom} unit="m/s" />
+              <MetricRow label="Ramp length" value={physics.rampLen} unit="m" />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 3: SPRINGS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Springs() {
+      const [k, setK] = useState(200);
+      const [x, setX] = useState(0.2);
+      const [m, setM] = useState(1);
+
+      // Animation: 0 = compressed, 1 = fully released and sliding away
+      const [isPlaying, setIsPlaying] = useState(false);
+      const [animFrac, setAnimFrac] = useState(0);
+      const rafRef = useRef(null);
+      const lastFrameRef = useRef(null);
+
+      const physics = useMemo(() => {
+        const PEspring = 0.5 * k * x * x;
+        const vRelease = Math.sqrt(k * x * x / m);
+        const KEreleased = PEspring;
+        return { PEspring: round2(PEspring), vRelease: round2(vRelease), KEreleased: round2(KEreleased) };
+      }, [k, x, m]);
+
+      // Live values during animation
+      const live = useMemo(() => {
+        // Phase 1 (frac 0-0.5): spring extends from compressed to rest
+        // Phase 2 (frac 0.5-1): block slides away, spring at rest
+        const springFrac = Math.min(animFrac * 2, 1); // 0→1 during phase 1
+        const slideFrac = Math.max((animFrac - 0.5) * 2, 0); // 0→1 during phase 2
+        const curX = x * (1 - springFrac); // compression decreasing
+        const curPE = 0.5 * k * curX * curX;
+        const curKE = Math.max(physics.PEspring - curPE, 0);
+        const curV = Math.sqrt(2 * curKE / m);
+        return { x: round2(curX), PE: round1(curPE), KE: round1(curKE), v: round2(curV), springFrac, slideFrac };
+      }, [animFrac, x, k, m, physics.PEspring]);
+
+      const stopAnim = useCallback(() => {
+        if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+        lastFrameRef.current = null;
+        setIsPlaying(false);
+      }, []);
+
+      const animate = useCallback((ts) => {
+        if (!lastFrameRef.current) { lastFrameRef.current = ts; rafRef.current = requestAnimationFrame(animate); return; }
+        const dt = (ts - lastFrameRef.current) / 1000;
+        lastFrameRef.current = ts;
+        setAnimFrac(prev => {
+          const next = prev + dt * 1.2;
+          if (next >= 1) { stopAnim(); return 1; }
+          return next;
+        });
+        rafRef.current = requestAnimationFrame(animate);
+      }, [stopAnim]);
+
+      const togglePlay = useCallback(() => {
+        if (isPlaying) { stopAnim(); return; }
+        if (animFrac >= 1) setAnimFrac(0);
+        setIsPlaying(true);
+        lastFrameRef.current = null;
+        rafRef.current = requestAnimationFrame(animate);
+      }, [isPlaying, animFrac, stopAnim, animate]);
+
+      const resetAnim = useCallback(() => { stopAnim(); setAnimFrac(0); }, [stopAnim]);
+
+      useEffect(() => { stopAnim(); setAnimFrac(0); }, [k, x, m]);
+      useEffect(() => () => { if (rafRef.current) cancelAnimationFrame(rafRef.current); }, []);
+
+      const barData = [
+        { name: "Spring PE", value: physics.PEspring, fill: C.spring },
+        { name: "KE (released)", value: physics.KEreleased, fill: C.ke },
+      ];
+
+      const hints = useMemo(() => {
+        const out = [];
+        out.push({ icon: "\uD83C\uDFAF", text: `Spring PE depends on x\u00B2 \u2014 double the compression, quadruple the energy! This is why springs feel much stiffer the further you compress them.` });
+        if (k >= 400) out.push({ icon: "\u26A1", text: "High spring constant! This is a very stiff spring \u2014 think car suspension vs a Slinky." });
+        out.push({ icon: "\uD83D\uDD04", text: `When released, all spring PE converts to KE: ${HALF}kx\u00B2 = ${HALF}mv\u00B2. Solving for v gives v = x${SQRT}(k/m).` });
+        return out;
+      }, [k, x]);
+
+      // SVG spring geometry
+      const springBaseX = 80, springY = 100;
+      const restLen = 200;
+      const curCompression = isPlaying || animFrac > 0 ? live.x * 400 : x * 400;
+      const compressed = restLen - curCompression;
+      const blockBaseX = springBaseX + Math.max(compressed, 40);
+      const slideOffset = live.slideFrac * 180;
+      const blockX = blockBaseX + slideOffset;
+
+      const coils = 12;
+      const springEndX = isPlaying || animFrac > 0 ? Math.min(blockX - 20, springBaseX + restLen + 5) : blockX - 20;
+      const springPath = useMemo(() => {
+        const len = Math.max(springEndX - springBaseX - 10, 30);
+        const dx = len / coils;
+        let d = `M ${springBaseX + 5},${springY}`;
+        for (let i = 0; i < coils; i++) {
+          const dir = i % 2 === 0 ? -1 : 1;
+          d += ` L ${springBaseX + 5 + (i + 1) * dx},${springY + dir * 12}`;
+        }
+        d += ` L ${springEndX},${springY}`;
+        return d;
+      }, [springEndX]);
+
+      // Energy bars
+      const maxE = Math.max(physics.PEspring, 1);
+      const barMaxH = 80;
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label="Spring Constant (k)" value={k} min={10} max={1000} step={10} onChange={setK} unit="N/m" />
+              <Slider label="Compression (x)" value={x} min={0} max={0.5} step={0.01} onChange={setX} unit="m" />
+              <Slider label="Block Mass (m)" value={m} min={0.1} max={10} step={0.1} onChange={setM} unit="kg" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Spring Energy", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `PE_spring = ${HALF}kx\u00B2 = ${physics.PEspring} J`, style: { color: C.spring } },
+              { text: `KE_released = PE_spring = ${physics.KEreleased} J`, style: { color: C.ke } },
+              { text: `v = x${SQRT}(k/m) = ${physics.vRelease} m/s` },
+            ]} />
+          }
+          svg={
+            <>
+              <Panel title="SPRING DIAGRAM">
+                <svg viewBox="0 0 550 200" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                  <rect x={60} y={60} width={20} height={80} fill={C.border} rx={2} />
+                  <line x1={60} y1={springY + 25} x2={520} y2={springY + 25} stroke={C.border} strokeWidth={1} />
+                  <path d={springPath} fill="none" stroke={C.spring} strokeWidth={2.5} />
+                  <rect x={blockX - 20} y={springY - 20} width={40} height={40} fill={C.panel} stroke={C.text} strokeWidth={1.5} rx={4} />
+                  <text x={blockX} y={springY + 4} fill={C.textDim} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">{m}kg</text>
+                  {/* Compression label */}
+                  {live.x > 0 && <text x={springBaseX + compressed / 2 + 10} y={springY - 30} fill={C.spring} fontSize={9} fontFamily="'JetBrains Mono'" textAnchor="middle">x={live.x}m</text>}
+                  {/* Velocity arrow */}
+                  {live.v > 0.1 && <VelArrow x={blockX + 25} y={springY} length={Math.min(live.v * 8, 80)} color={C.ke} label={`v=${live.v}m/s`} up />}
+                  {/* Live energy bars in SVG */}
+                  <rect x={460} y={springY + 25 - (live.PE / maxE) * barMaxH} width={20} height={Math.max((live.PE / maxE) * barMaxH, 1)} fill={C.spring} rx={2} />
+                  <text x={470} y={springY + 40} fill={C.spring} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">PE</text>
+                  <rect x={490} y={springY + 25 - (live.KE / maxE) * barMaxH} width={20} height={Math.max((live.KE / maxE) * barMaxH, 1)} fill={C.ke} rx={2} />
+                  <text x={500} y={springY + 40} fill={C.ke} fontSize={8} fontFamily="'JetBrains Mono'" textAnchor="middle">KE</text>
+                </svg>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button onClick={togglePlay}
+                    style={{ background: C.accent, color: C.bg, border: "none", borderRadius: 4, padding: "5px 14px", fontSize: 11, fontFamily: "'JetBrains Mono'", fontWeight: 700, cursor: "pointer" }}>
+                    {isPlaying ? "\u23F8 Pause" : "\u25B6 Release"}
+                  </button>
+                  <button onClick={resetAnim}
+                    style={{ background: "transparent", color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 4, padding: "5px 12px", fontSize: 11, fontFamily: "'JetBrains Mono'", cursor: "pointer" }}>
+                    &#8634; Reset
+                  </button>
+                </div>
+              </Panel>
+            </>
+          }
+          results={
+            <Panel title="LIVE READOUT">
+              <MetricRow label="Compression" value={live.x} unit="m" />
+              <MetricRow label="Velocity" value={live.v} unit="m/s" />
+              <MetricRow label="Spring PE" value={live.PE} unit="J" color={C.spring} />
+              <MetricRow label="Kinetic Energy" value={live.KE} unit="J" color={C.ke} />
+              <MetricRow label="Total Energy" value={physics.PEspring} unit="J" color={C.total} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 4: ELASTIC COLLISIONS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Elastic() {
+      const [m1, setM1] = useState(5);
+      const [m2, setM2] = useState(3);
+      const [v1, setV1] = useState(4);
+      const [v2, setV2] = useState(-2);
+
+      const physics = useMemo(() => {
+        const p_before = m1 * v1 + m2 * v2;
+        const KE_before = 0.5 * m1 * v1 * v1 + 0.5 * m2 * v2 * v2;
+        const v1f = ((m1 - m2) * v1 + 2 * m2 * v2) / (m1 + m2);
+        const v2f = ((m2 - m1) * v2 + 2 * m1 * v1) / (m1 + m2);
+        const p_after = m1 * v1f + m2 * v2f;
+        const KE_after = 0.5 * m1 * v1f * v1f + 0.5 * m2 * v2f * v2f;
+        return {
+          p_before: round2(p_before), KE_before: round2(KE_before),
+          v1f: round2(v1f), v2f: round2(v2f),
+          p_after: round2(p_after), KE_after: round2(KE_after),
+        };
+      }, [m1, m2, v1, v2]);
+
+      const hints = useMemo(() => {
+        const out = [];
+        if (m1 === m2) out.push({ icon: "\uD83C\uDFAF", text: "Equal masses: they swap velocities! Object 1 takes Object 2's velocity and vice versa. Try it with billiard balls." });
+        if (m1 > m2 * 5) out.push({ icon: "\uD83D\uDE9A", text: "Much heavier object barely slows down \u2014 like a truck hitting a tennis ball. The light object bounces off fast." });
+        out.push({ icon: "\u2705", text: "In elastic collisions, BOTH momentum AND kinetic energy are exactly preserved." });
+        return out;
+      }, [m1, m2]);
+
+      // Inline SVG arrow — avoids component boundary issues
+      function drawVelArrow(originX, cy, vel, scale, col) {
+        if (Math.abs(vel) < 0.05) return null;
+        var px = vel * scale;
+        var d = px >= 0 ? 1 : -1;
+        var a = Math.abs(px);
+        var ex = originX + d * a;
+        return React.createElement("g", { key: col + vel },
+          React.createElement("line", { x1: originX, y1: cy, x2: ex, y2: cy, stroke: col, strokeWidth: 2.5 }),
+          React.createElement("polygon", { points: ex+","+cy+" "+(ex-d*8)+","+(cy-5)+" "+(ex-d*8)+","+(cy+5), fill: col }),
+          React.createElement("text", { x: (originX+ex)/2, y: cy - 10, fill: col, fontSize: 10, fontFamily: "'JetBrains Mono'", textAnchor: "middle" }, round2(vel)+"m/s")
+        );
+      }
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label={"Mass 1 (m" + SUB1 + ")"} value={m1} min={0.5} max={20} step={0.5} onChange={setM1} unit="kg" />
+              <Slider label={"Velocity 1 (v" + SUB1 + ")"} value={v1} min={-10} max={10} step={0.5} onChange={setV1} unit="m/s" />
+              <Slider label={"Mass 2 (m" + SUB2 + ")"} value={m2} min={0.5} max={20} step={0.5} onChange={setM2} unit="kg" />
+              <Slider label={"Velocity 2 (v" + SUB2 + ")"} value={v2} min={-10} max={10} step={0.5} onChange={setV2} unit="m/s" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Elastic Collision", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: "v" + SUB1 + "' = (m" + SUB1 + "-m" + SUB2 + ")v" + SUB1 + " + 2m" + SUB2 + "v" + SUB2 + " / (m" + SUB1 + "+m" + SUB2 + ")" },
+              { text: "v" + SUB1 + "' = " + physics.v1f + " m/s", style: { color: C.obj1 } },
+              { text: "v" + SUB2 + "' = (m" + SUB2 + "-m" + SUB1 + ")v" + SUB2 + " + 2m" + SUB1 + "v" + SUB1 + " / (m" + SUB1 + "+m" + SUB2 + ")" },
+              { text: "v" + SUB2 + "' = " + physics.v2f + " m/s", style: { color: C.obj2 } },
+            ]} />
+          }
+          svg={
+            <Panel title="BEFORE & AFTER">
+              <svg viewBox="0 0 550 220" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                <text x={275} y={20} fill={C.textDim} fontSize={11} fontFamily="'Orbitron'" textAnchor="middle">BEFORE</text>
+                <line x1={30} y1={70} x2={520} y2={70} stroke={C.border} strokeWidth={1} />
+                <rect x={140} y={40} width={50} height={40} fill={C.panel} stroke={C.obj1} strokeWidth={2} rx={4} />
+                <text x={165} y={64} fill={C.obj1} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">{"m" + SUB1}</text>
+                {drawVelArrow(v1 > 0 ? 195 : 135, 60, v1, 12, C.obj1)}
+                <rect x={340} y={40} width={50} height={40} fill={C.panel} stroke={C.obj2} strokeWidth={2} rx={4} />
+                <text x={365} y={64} fill={C.obj2} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">{"m" + SUB2}</text>
+                {drawVelArrow(v2 > 0 ? 395 : 335, 60, v2, 12, C.obj2)}
+
+                <line x1={30} y1={110} x2={520} y2={110} stroke={C.accent} strokeWidth={1} strokeDasharray="6 4" />
+                <text x={275} y={132} fill={C.textDim} fontSize={11} fontFamily="'Orbitron'" textAnchor="middle">AFTER</text>
+
+                <line x1={30} y1={180} x2={520} y2={180} stroke={C.border} strokeWidth={1} />
+                <rect x={140} y={150} width={50} height={40} fill={C.panel} stroke={C.obj1} strokeWidth={2} rx={4} />
+                <text x={165} y={174} fill={C.obj1} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">{"m" + SUB1}</text>
+                {drawVelArrow(physics.v1f > 0 ? 195 : 135, 170, physics.v1f, 12, C.obj1)}
+                <rect x={340} y={150} width={50} height={40} fill={C.panel} stroke={C.obj2} strokeWidth={2} rx={4} />
+                <text x={365} y={174} fill={C.obj2} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">{"m" + SUB2}</text>
+                {drawVelArrow(physics.v2f > 0 ? 395 : 335, 170, physics.v2f, 12, C.obj2)}
+              </svg>
+            </Panel>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="p before" value={physics.p_before} unit={"kg" + CDOT + "m/s"} color={C.momentum} />
+              <MetricRow label="p after" value={physics.p_after} unit={"kg" + CDOT + "m/s"} color={C.momentum} />
+              <MetricRow label="KE before" value={physics.KE_before} unit="J" color={C.ke} />
+              <MetricRow label="KE after" value={physics.KE_after} unit="J" color={C.ke} />
+              <MetricRow label={"v" + SUB1 + " after"} value={physics.v1f} unit="m/s" color={C.obj1} />
+              <MetricRow label={"v" + SUB2 + " after"} value={physics.v2f} unit="m/s" color={C.obj2} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 5: INELASTIC COLLISIONS
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Inelastic() {
+      const [m1, setM1] = useState(5);
+      const [m2, setM2] = useState(3);
+      const [v1, setV1] = useState(4);
+      const [v2, setV2] = useState(-2);
+
+      const physics = useMemo(() => {
+        const p_before = m1 * v1 + m2 * v2;
+        const KE_before = 0.5 * m1 * v1 * v1 + 0.5 * m2 * v2 * v2;
+        const vf = p_before / (m1 + m2);
+        const KE_after = 0.5 * (m1 + m2) * vf * vf;
+        const KE_lost = KE_before - KE_after;
+        const pctLost = KE_before > 0 ? round1((KE_lost / KE_before) * 100) : 0;
+        return {
+          p_before: round2(p_before), KE_before: round2(KE_before),
+          vf: round2(vf), KE_after: round2(KE_after),
+          KE_lost: round2(KE_lost), pctLost,
+        };
+      }, [m1, m2, v1, v2]);
+
+      const barData = [
+        { name: "KE before", value: physics.KE_before, fill: C.ke },
+        { name: "KE after", value: physics.KE_after, fill: C.ke },
+        { name: "KE lost", value: physics.KE_lost, fill: C.heat },
+      ];
+
+      const hints = useMemo(() => {
+        const out = [];
+        out.push({ icon: "\uD83D\uDCA5", text: "Perfectly inelastic: objects stick together. Momentum is ALWAYS conserved, but KE is NOT." });
+        out.push({ icon: "\uD83D\uDD25", text: `${physics.pctLost}% of kinetic energy lost! It becomes sound, heat, and deformation \u2014 think of a car crash crumpling metal.` });
+        if (Math.abs(physics.vf) < 0.01) out.push({ icon: "\uD83D\uDED1", text: "The combined object is nearly stationary! Equal and opposite momenta cancelled out." });
+        return out;
+      }, [physics]);
+
+      const arrowScale = 12;
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <Slider label={`Mass 1 (m${SUB1})`} value={m1} min={0.5} max={20} step={0.5} onChange={setM1} unit="kg" />
+              <Slider label={`Velocity 1 (v${SUB1})`} value={v1} min={-10} max={10} step={0.5} onChange={setV1} unit="m/s" />
+              <Slider label={`Mass 2 (m${SUB2})`} value={m2} min={0.5} max={20} step={0.5} onChange={setM2} unit="kg" />
+              <Slider label={`Velocity 2 (v${SUB2})`} value={v2} min={-10} max={10} step={0.5} onChange={setV2} unit="m/s" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: "Perfectly Inelastic", style: { color: C.accent, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `m${SUB1}v${SUB1} + m${SUB2}v${SUB2} = (m${SUB1}+m${SUB2})v${PRME}` },
+              { text: `v${PRME} = p / (m${SUB1}+m${SUB2}) = ${physics.vf} m/s`, style: { color: C.total } },
+              { text: `KE lost = ${physics.KE_lost} J (${physics.pctLost}%)`, style: { color: C.heat } },
+            ]} />
+          }
+          svg={
+            <>
+              <Panel title="BEFORE & AFTER">
+                <svg viewBox="0 0 550 220" style={{ width: "100%", background: "rgba(0,0,0,0.2)", borderRadius: 6 }}>
+                  <text x={275} y={20} fill={C.textDim} fontSize={11} fontFamily="'Orbitron'" textAnchor="middle">BEFORE</text>
+                  <line x1={30} y1={70} x2={520} y2={70} stroke={C.border} strokeWidth={1} />
+                  <rect x={140} y={40} width={50} height={40} fill={C.panel} stroke={C.obj1} strokeWidth={2} rx={4} />
+                  <text x={165} y={64} fill={C.obj1} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">m{SUB1}</text>
+                  {v1 !== 0 && <VelArrow x={v1 > 0 ? 195 : 135} y={60} length={v1 * arrowScale} color={C.obj1} label={`${v1}m/s`} up />}
+                  <rect x={340} y={40} width={50} height={40} fill={C.panel} stroke={C.obj2} strokeWidth={2} rx={4} />
+                  <text x={365} y={64} fill={C.obj2} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">m{SUB2}</text>
+                  {v2 !== 0 && <VelArrow x={v2 > 0 ? 395 : 335} y={60} length={v2 * arrowScale} color={C.obj2} label={`${v2}m/s`} up />}
+
+                  <line x1={30} y1={110} x2={520} y2={110} stroke={C.accent} strokeWidth={1} strokeDasharray="6 4" />
+                  <text x={275} y={132} fill={C.textDim} fontSize={11} fontFamily="'Orbitron'" textAnchor="middle">AFTER (stuck together)</text>
+
+                  <line x1={30} y1={180} x2={520} y2={180} stroke={C.border} strokeWidth={1} />
+                  {/* Combined block */}
+                  <rect x={225} y={150} width={100} height={40} fill={C.panel} stroke={C.total} strokeWidth={2} rx={4} />
+                  <text x={275} y={174} fill={C.total} fontSize={10} fontFamily="'JetBrains Mono'" textAnchor="middle">{m1 + m2}kg</text>
+                  {Math.abs(physics.vf) > 0.01 && <VelArrow x={physics.vf > 0 ? 330 : 220} y={170} length={physics.vf * arrowScale} color={C.total} label={`${physics.vf}m/s`} up />}
+                </svg>
+              </Panel>
+              <EnergyBarChart data={barData} height={170} />
+            </>
+          }
+          results={
+            <Panel title="RESULTS">
+              <MetricRow label="Momentum before" value={physics.p_before} unit={`kg${CDOT}m/s`} color={C.momentum} />
+              <MetricRow label="Momentum after" value={round2(physics.vf * (m1 + m2))} unit={`kg${CDOT}m/s`} color={C.momentum} />
+              <MetricRow label="KE before" value={physics.KE_before} unit="J" color={C.ke} />
+              <MetricRow label="KE after" value={physics.KE_after} unit="J" color={C.ke} />
+              <MetricRow label="KE lost" value={physics.KE_lost} unit="J" color={C.heat} />
+              <MetricRow label="% KE lost" value={physics.pctLost} unit="%" color={C.heat} />
+              <MetricRow label="Combined velocity" value={physics.vf} unit="m/s" color={C.total} />
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // TAB 6: COLLISION PLAYGROUND
+    // ═══════════════════════════════════════════════════════════════
+
+    function Tab_Playground() {
+      const [mode, setMode] = useState("elastic");
+      const [m1, setM1] = useState(5);
+      const [m2, setM2] = useState(5);
+      const [v1, setV1] = useState(3);
+      const [v2, setV2] = useState(-3);
+
+      const physics = useMemo(() => {
+        const p_before = m1 * v1 + m2 * v2;
+        const KE_before = 0.5 * m1 * v1 * v1 + 0.5 * m2 * v2 * v2;
+
+        let v1f, v2f, KE_after;
+        if (mode === "elastic") {
+          v1f = ((m1 - m2) * v1 + 2 * m2 * v2) / (m1 + m2);
+          v2f = ((m2 - m1) * v2 + 2 * m1 * v1) / (m1 + m2);
+          KE_after = 0.5 * m1 * v1f * v1f + 0.5 * m2 * v2f * v2f;
+        } else {
+          const vf = p_before / (m1 + m2);
+          v1f = vf;
+          v2f = vf;
+          KE_after = 0.5 * (m1 + m2) * vf * vf;
+        }
+
+        const p_after = mode === "elastic" ? m1 * v1f + m2 * v2f : (m1 + m2) * v1f;
+        const KE_lost = KE_before - KE_after;
+        const pctLost = KE_before > 0 ? round1((KE_lost / KE_before) * 100) : 0;
+
+        return {
+          p_before: round2(p_before), p_after: round2(p_after),
+          KE_before: round2(KE_before), KE_after: round2(KE_after),
+          v1f: round2(v1f), v2f: round2(v2f),
+          KE_lost: round2(KE_lost), pctLost,
+          pConserved: Math.abs(p_before - p_after) < 0.01,
+          keConserved: Math.abs(KE_before - KE_after) < 0.01,
+        };
+      }, [mode, m1, m2, v1, v2]);
+
+      const comparisonData = [
+        { name: "Momentum Before", value: Math.abs(physics.p_before), fill: C.momentum },
+        { name: "Momentum After", value: Math.abs(physics.p_after), fill: C.momentum },
+        { name: "KE Before", value: physics.KE_before, fill: C.ke },
+        { name: "KE After", value: physics.KE_after, fill: C.ke },
+      ];
+
+      const hints = useMemo(() => {
+        const out = [];
+        out.push({
+          icon: physics.pConserved ? "\u2705" : "\u274C",
+          text: `Momentum: ${physics.p_before} \u2192 ${physics.p_after} kg${CDOT}m/s ${physics.pConserved ? "\u2014 CONSERVED!" : "\u2014 NOT conserved (check your math)"}`
+        });
+        out.push({
+          icon: physics.keConserved ? "\u2705" : "\u274C",
+          text: `KE: ${physics.KE_before} \u2192 ${physics.KE_after} J ${physics.keConserved ? "\u2014 CONSERVED! (elastic)" : `\u2014 NOT conserved! ${physics.pctLost}% lost (inelastic)`}`
+        });
+        out.push({ icon: "\uD83D\uDCA1", text: "The big takeaway: momentum is ALWAYS conserved in any collision. Kinetic energy is only conserved in elastic collisions. Try switching between modes with the same inputs!" });
+        return out;
+      }, [physics]);
+
+      return (
+        <TabLayout
+          sliders={
+            <Panel title="PARAMETERS">
+              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                <button onClick={() => setMode("elastic")}
+                  style={{ flex: 1, background: mode === "elastic" ? C.accent : "transparent", color: mode === "elastic" ? C.bg : C.textDim, border: `1px solid ${mode === "elastic" ? C.accent : C.border}`, borderRadius: 6, padding: "6px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", cursor: "pointer", fontWeight: mode === "elastic" ? 700 : 400 }}>
+                  Elastic
+                </button>
+                <button onClick={() => setMode("inelastic")}
+                  style={{ flex: 1, background: mode === "inelastic" ? C.heat : "transparent", color: mode === "inelastic" ? "#fff" : C.textDim, border: `1px solid ${mode === "inelastic" ? C.heat : C.border}`, borderRadius: 6, padding: "6px 8px", fontSize: 11, fontFamily: "'JetBrains Mono'", cursor: "pointer", fontWeight: mode === "inelastic" ? 700 : 400 }}>
+                  Inelastic
+                </button>
+              </div>
+              <Slider label={`m${SUB1}`} value={m1} min={0.5} max={20} step={0.5} onChange={setM1} unit="kg" />
+              <Slider label={`v${SUB1}`} value={v1} min={-10} max={10} step={0.5} onChange={setV1} unit="m/s" />
+              <Slider label={`m${SUB2}`} value={m2} min={0.5} max={20} step={0.5} onChange={setM2} unit="kg" />
+              <Slider label={`v${SUB2}`} value={v2} min={-10} max={10} step={0.5} onChange={setV2} unit="m/s" />
+            </Panel>
+          }
+          equations={
+            <EquationBlock lines={[
+              { text: `${mode === "elastic" ? "Elastic" : "Inelastic"} Collision`, style: { color: mode === "elastic" ? C.accent : C.heat, marginBottom: 4, fontSize: 12, fontFamily: "'Orbitron', sans-serif" } },
+              { text: `p = m${SUB1}v${SUB1} + m${SUB2}v${SUB2} = ${physics.p_before} kg${CDOT}m/s` },
+              mode === "elastic"
+                ? { text: `v${SUB1}${PRME}=${physics.v1f}, v${SUB2}${PRME}=${physics.v2f} m/s` }
+                : { text: `v${PRME} = p/(m${SUB1}+m${SUB2}) = ${physics.v1f} m/s` },
+              { text: `KE: ${physics.KE_before} \u2192 ${physics.KE_after} J ${physics.keConserved ? "(conserved)" : `(${physics.pctLost}% lost)`}` },
+            ]} />
+          }
+          svg={
+            <>
+              <Panel title="CONSERVATION COMPARISON">
+                <ResponsiveContainer width="100%" height={210}>
+                  <BarChart data={comparisonData} margin={{ top: 10, right: 20, bottom: 5, left: 10 }}>
+                    <CartesianGrid stroke={C.border} strokeDasharray="3 3" />
+                    <XAxis dataKey="name" tick={{ fill: C.muted, fontSize: 9, fontFamily: "'JetBrains Mono'" }} />
+                    <YAxis tick={{ fill: C.muted, fontSize: 10, fontFamily: "'JetBrains Mono'" }} />
+                    <Tooltip contentStyle={{ background: C.panel, border: `1px solid ${C.border}`, borderRadius: 4, fontFamily: "'JetBrains Mono'", fontSize: 11 }} />
+                    <Bar dataKey="value" radius={[4, 4, 0, 0]}>
+                      {comparisonData.map((entry, i) => <Cell key={i} fill={entry.fill} />)}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </Panel>
+            </>
+          }
+          results={
+            <Panel title="RESULTS">
+              <div style={{ borderBottom: `1px solid ${C.border}`, paddingBottom: 6, marginBottom: 6 }}>
+                <MetricRow label="p before" value={physics.p_before} unit={`kg${CDOT}m/s`} color={C.momentum} />
+                <MetricRow label="p after" value={physics.p_after} unit={`kg${CDOT}m/s`} color={C.momentum} />
+                <MetricRow label="p conserved?" value={physics.pConserved ? "YES" : "NO"} unit="" color={physics.pConserved ? C.spring : C.heat} />
+              </div>
+              <MetricRow label="KE before" value={physics.KE_before} unit="J" color={C.ke} />
+              <MetricRow label="KE after" value={physics.KE_after} unit="J" color={C.ke} />
+              <MetricRow label="KE conserved?" value={physics.keConserved ? "YES" : "NO"} unit="" color={physics.keConserved ? C.spring : C.heat} />
+              {!physics.keConserved && <MetricRow label="KE lost" value={`${physics.KE_lost} J (${physics.pctLost}%)`} unit="" color={C.heat} />}
+              {mode === "elastic" ? <>
+                <MetricRow label={`v${SUB1} after`} value={physics.v1f} unit="m/s" color={C.obj1} />
+                <MetricRow label={`v${SUB2} after`} value={physics.v2f} unit="m/s" color={C.obj2} />
+              </> : <MetricRow label="Combined v" value={physics.v1f} unit="m/s" color={C.total} />}
+            </Panel>
+          }
+          hints={<HintBox hints={hints} />}
+        />
+      );
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MAIN COMPONENT
+    // ═══════════════════════════════════════════════════════════════
+
+    function CollisionsSimulator() {
+      const [activeTab, setActiveTab] = useState("kepe");
+
+      const tabComponents = {
+        kepe: Tab_KEPE,
+        conserve: Tab_Conservation,
+        springs: Tab_Springs,
+        elast: Tab_Elastic,
+        inelastic: Tab_Inelastic,
+        playground: Tab_Playground,
+      };
+
+      const ActiveComponent = tabComponents[activeTab];
+
+      return (
+        <div style={{ background: C.bg, color: C.text, minHeight: "100vh", padding: "20px 24px", fontFamily: "'JetBrains Mono', monospace" }}>
+          <div style={{ textAlign: "center", marginBottom: 16 }}>
+            <h1 style={{ fontFamily: "'Orbitron', sans-serif", fontSize: 20, fontWeight: 700, color: C.accent, letterSpacing: 2, marginBottom: 4 }}>
+              ENERGY &amp; COLLISIONS
+            </h1>
+            <p style={{ color: C.muted, fontSize: 12 }}>KE, PE, springs, elastic &amp; inelastic collisions</p>
+          </div>
+
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 16, justifyContent: "center" }}>
+            {TABS.map((tab) => (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+                style={{
+                  background: activeTab === tab.id ? C.accent : "transparent",
+                  color: activeTab === tab.id ? C.bg : C.textDim,
+                  border: `1px solid ${activeTab === tab.id ? C.accent : C.border}`,
+                  borderRadius: 6, padding: "6px 14px", fontSize: 11,
+                  fontFamily: "'JetBrains Mono', monospace", cursor: "pointer",
+                  fontWeight: activeTab === tab.id ? 700 : 400, transition: "all 0.15s",
+                }}>
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <ActiveComponent />
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<CollisionsSimulator />);
+  </script>
+</body>
+</html>
